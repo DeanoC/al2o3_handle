@@ -4,10 +4,14 @@
 #include "al2o3_handle/handle.h"
 #include "al2o3_handle/handlemanager.h"
 
-static const uint32_t MaxHandles32Bit = 0x00FFFFFFu;
+#define MaxHandles32Bit 0x00FFFFFFu
+#define MUTEX_LOCK if(manager->mutexPtr) { Thread_MutexAcquire(manager->mutexPtr); }
+#define MUTEX_UNLOCK if(manager->mutexPtr) { Thread_MutexRelease(manager->mutexPtr); }
+
 
 typedef struct Handle_Manager32 {
-	Thread_Mutex mutex;
+	Thread_Mutex inbuiltMutex;
+	Thread_Mutex* mutexPtr;
 
 	uint32_t numHandlesInBlock;
 	size_t elementSize;
@@ -65,11 +69,12 @@ static void Handle_ManagerNewHandleBlock32(Handle_Manager32Handle manager) {
 	manager->handleAllocatedCount = newHandleCount;
 }
 
-AL2O3_EXTERN_C Handle_Manager32Handle Handle_Manager32Create(size_t elementSize, size_t allocationBlockSize) {
+AL2O3_EXTERN_C Handle_Manager32Handle Handle_Manager32CreateWithMutex(size_t elementSize, size_t allocationBlockSize, Thread_Mutex* mutex) {
 	ASSERT(elementSize >= sizeof(uint32_t));
 	Handle_Manager32Handle manager = (Handle_Manager32Handle) MEMORY_CALLOC(1, sizeof(Handle_Manager32));
-	Thread_MutexCreate(&manager->mutex);
-	Thread_MutexAcquire(&manager->mutex);
+	manager->mutexPtr = mutex;
+
+	MUTEX_LOCK
 
 	manager->numHandlesInBlock = allocationBlockSize;
 	manager->elementSize = elementSize;
@@ -78,25 +83,53 @@ AL2O3_EXTERN_C Handle_Manager32Handle Handle_Manager32Create(size_t elementSize,
 
 	Handle_ManagerNewHandleBlock32(manager);
 
-	Thread_MutexRelease(&manager->mutex);
+	MUTEX_UNLOCK
+
+	return manager;
+
+}
+
+AL2O3_EXTERN_C Handle_Manager32Handle Handle_Manager32CreateNoLocks(size_t elementSize, size_t allocationBlockSize) {
+	return Handle_Manager32CreateWithMutex(elementSize, allocationBlockSize, NULL);
+}
+
+AL2O3_EXTERN_C Handle_Manager32Handle Handle_Manager32Create(size_t elementSize, size_t allocationBlockSize) {
+	ASSERT(elementSize >= sizeof(uint32_t));
+	Handle_Manager32Handle manager = (Handle_Manager32Handle) MEMORY_CALLOC(1, sizeof(Handle_Manager32));
+	Thread_MutexCreate(&manager->inbuiltMutex);
+	manager->mutexPtr = &manager->inbuiltMutex;
+
+	MUTEX_LOCK
+
+	manager->numHandlesInBlock = allocationBlockSize;
+	manager->elementSize = elementSize;
+	manager->freeListHead = ~0u;
+	manager->deferredFreeListHead = ~0u;
+
+	Handle_ManagerNewHandleBlock32(manager);
+
+	MUTEX_UNLOCK
 
 	return manager;
 }
 
 AL2O3_EXTERN_C void Handle_Manager32Destroy(Handle_Manager32Handle manager) {
-	if(!manager) {
+	if (!manager) {
 		return;
 	}
 	MEMORY_FREE(manager->baseHandleAddress);
 	MEMORY_FREE(manager->baseHandleGen);
 
-	Thread_MutexDestroy(&manager->mutex);
+	if (manager->mutexPtr == &manager->inbuiltMutex) {
+		Thread_MutexDestroy(&manager->inbuiltMutex);
+	}
+
 	MEMORY_FREE(manager);
 }
 
 
 AL2O3_EXTERN_C Handle_Handle32 Handle_Manager32Alloc(Handle_Manager32Handle manager) {
-	Thread_MutexAcquire(&manager->mutex);
+	MUTEX_LOCK
 
 RedoAllocation:
 	// first we check if the some free on the free list
@@ -110,7 +143,8 @@ RedoAllocation:
 
 		// now make the handle
 		uint8_t* gen = manager->baseHandleGen + index;
-		Thread_MutexRelease(&manager->mutex);
+		MUTEX_UNLOCK
+
 		return index | ((uint32_t)*gen) << 24u;
 	} else {
 		// allocate a new block and then redo
@@ -123,7 +157,7 @@ RedoAllocation:
 // TODO possibly release only needs to take a mutex versus allocation if atomic
 // are used or at least a smaller mutex against other releases and locks.
 AL2O3_EXTERN_C void Handle_Manager32Release(Handle_Manager32Handle manager, Handle_Handle32 handle) {
-	Thread_MutexAcquire(&manager->mutex);
+	MUTEX_LOCK
 
 	ASSERT((handle & MaxHandles32Bit)  < manager->handleAllocatedCount );
 	ASSERT( CheckGeneration32(manager, handle));
@@ -153,15 +187,15 @@ AL2O3_EXTERN_C void Handle_Manager32Release(Handle_Manager32Handle manager, Hand
 	manager->deferredFreeListHead = index;
 	manager->deferredCount++;
 
-	Thread_MutexRelease(&manager->mutex);
+	MUTEX_UNLOCK
 }
 
 AL2O3_EXTERN_C bool Handle_Manager32IsValid(Handle_Manager32Handle manager, Handle_Handle32 handle) {
-	Thread_MutexAcquire(&manager->mutex);
+	MUTEX_LOCK
 
 	bool valid = CheckGeneration32(manager, handle);
 
-	Thread_MutexRelease(&manager->mutex);
+	MUTEX_UNLOCK
 	return valid;
 }
 
@@ -171,7 +205,7 @@ AL2O3_EXTERN_C void* Handle_Manager32ToPtrUnsafe(Handle_Manager32Handle manager,
 }
 
 AL2O3_EXTERN_C void* Handle_Manager32ToPtrLock(Handle_Manager32Handle manager, Handle_Handle32 handle){
-	Thread_MutexAcquire(&manager->mutex);
+	MUTEX_LOCK
 
 	ASSERT(CheckGeneration32(manager, handle));
 
@@ -179,25 +213,24 @@ AL2O3_EXTERN_C void* Handle_Manager32ToPtrLock(Handle_Manager32Handle manager, H
 }
 
 AL2O3_EXTERN_C void Handle_Manager32ToPtrUnlock(Handle_Manager32Handle manager) {
-	Thread_MutexRelease(&manager->mutex);
+	MUTEX_UNLOCK
 }
 
 AL2O3_EXTERN_C void Handle_Manager32CopyTo(Handle_Manager32Handle manager, Handle_Handle32 handle, void* dst) {
-	Thread_MutexAcquire(&manager->mutex);
-
+	MUTEX_LOCK
 	ASSERT(CheckGeneration32(manager, handle));
 
 	memcpy(dst, ElementAddress32(manager, handle), manager->elementSize);
 
-	Thread_MutexRelease(&manager->mutex);
+	MUTEX_UNLOCK
 }
 
 AL2O3_EXTERN_C void Handle_Manager32CopyFrom(Handle_Manager32Handle manager, Handle_Handle32 handle, void const* src) {
-	Thread_MutexAcquire(&manager->mutex);
+	MUTEX_LOCK
 
 	ASSERT(CheckGeneration32(manager, handle));
 
 	memcpy(ElementAddress32(manager, handle), src, manager->elementSize);
 
-	Thread_MutexRelease(&manager->mutex);
+	MUTEX_UNLOCK
 }
