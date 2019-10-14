@@ -191,13 +191,13 @@ RedoAllocation:
 				return ~0u;
 			}
 			// swap in the deferred list
-RedoD0:
+RedoD0:;
 			// delink the deferred free list atomically
 			uint32_t const curDefFreeList = Thread_AtomicLoad32Relaxed(&manager->deferredFreeListHead);
 			if (Thread_AtomicCompareExchange32Relaxed(&manager->deferredFreeListHead, curDefFreeList, ~0u) != curDefFreeList) {
 				goto RedoD0;
 			}
-RedoD1:
+RedoD1:;
 			// new atomicly chain the delinked deferred into the free list
 			uint32_t const curFreeList = Thread_AtomicLoad32Relaxed(&manager->deferredFreeListHead);
 			if (Thread_AtomicCompareExchange32Relaxed(&manager->deferredFreeListHead, curDefFreeList, curDefFreeList) != curFreeList) {
