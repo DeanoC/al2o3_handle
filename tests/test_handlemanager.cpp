@@ -13,6 +13,47 @@ static void FillTest(Test* test) {
 	}
 }
 
+static void TestGenerations(int const AllocationBlockSize, Handle_Manager32 *manager) {
+	// | blk  |  Gen  | Def |
+	// |------|-------|-----|
+	// | 0    |   0   | 0   |
+	// | 2    |   N   | 2   | 2
+	// | 3    |   0   | 3   | 1
+	// | 4    |   N   | 3   | 1
+	// | 6    |   0   | 4   | 2
+	// | 7    |   N   | 0   | 1 --
+	// | 14   |   0   | 1   | 7
+	// | 15   |   N   | 1   | 1
+	// | 19   |   0   | 2   | 4
+	// | 20   |   N   | 2   | 1
+	// | 25   |   0   | 3   | 5
+	// | 26   |   N   | 3   | 1
+	// | 32   |   0   | 4   | 6
+	// | 33   |   N   | 0   | 1 --
+	// | 48   |   0   | 1   | 15
+	// | 49   |   N   | 1   | 1
+	uint32_t const blockTestTable[15] = {
+			2, 3, 4, 6, 7, 14, 15, 19, 20, 25, 26, 32, 33, 48, 49
+	};
+
+	bool shouldBeZeroGen = true;
+	uint32_t start = 0;
+	for(int i = 0; i < 15;++i) {
+		uint32_t end = blockTestTable[i];
+
+		for(uint32_t j = start * AllocationBlockSize; j < end * AllocationBlockSize;++j) {
+			Handle_Handle32 handle = Handle_Manager32Alloc(manager);
+			bool isZeroGen = (handle & 0xFF000000) == 0;
+			//			LOGINFO("%i : %i expected %i", j / AllocationBlockSize, handle >> 24, !shouldBeZeroGen);
+			REQUIRE(isZeroGen == shouldBeZeroGen);
+			Handle_Manager32Release(manager, handle);
+		}
+
+		shouldBeZeroGen ^= true;
+		start = end;
+	}
+}
+
 TEST_CASE("Basic tests", "[al2o3 handle]") {
 	Handle_Manager32Handle manager = Handle_Manager32Create(sizeof(Test), 16);
 	REQUIRE(manager);
@@ -45,38 +86,11 @@ TEST_CASE("deferred allocation tests", "[al2o3 handle]") {
 	Handle_Manager32Handle manager = Handle_Manager32Create(sizeof(Test), AllocationBlockSize);
 	REQUIRE(manager);
 
-	// the first AllocationBlockSize*2 are new gen0 indexes
-	// the next AllocationBlockSize are gen1 or gen2
-	// the nextAllocationBlockSize are gen0
-	// this shows the deferement to break up indexes is working
-	for(int i = 0; i < AllocationBlockSize * 4;++i) {
-		Handle_Handle32 handle = Handle_Manager32Alloc(manager);
-		if(i < AllocationBlockSize * 2) {
-			REQUIRE(handle == i);
-		} else if( i < AllocationBlockSize * 3){
-			uint32_t index = AllocationBlockSize - (i - AllocationBlockSize*2) - 1;
-			REQUIRE(handle == (0x01000000 | index));
-		} else {
-			REQUIRE(handle == (i - AllocationBlockSize));
-		}
-		Handle_Manager32Release(manager, handle);
-	}
-	// we should hit the deferred backoff limit, so these should all be existing
-	// reused handles. the first 48 are reused so not gen0, the last 16 are gen0
-	for(int i = 0; i < AllocationBlockSize * 4;++i) {
-		if( i < AllocationBlockSize * 2) {
-			Handle_Handle32 handle = Handle_Manager32Alloc(manager);
-			REQUIRE((handle & 0xFF000000) != 0);
-		} else if( i < AllocationBlockSize * 3){
-			Handle_Handle32 handle = Handle_Manager32Alloc(manager);
-			REQUIRE((handle & 0xFF000000) != 0);
-		} else {
-			Handle_Handle32 handle = Handle_Manager32Alloc(manager);
-			REQUIRE((handle & 0xFF000000) == 0);
-		}
-	}
+	TestGenerations(AllocationBlockSize, manager);
+
 	Handle_Manager32Destroy(manager);
 }
+
 
 TEST_CASE("generation tests", "[al2o3 handle]") {
 	static const int AllocationBlockSize = 16;
@@ -177,36 +191,8 @@ TEST_CASE("deferred allocation tests  No Locks", "[al2o3 handle]") {
 	Handle_Manager32Handle manager = Handle_Manager32CreateNoLocks(sizeof(Test), AllocationBlockSize);
 	REQUIRE(manager);
 
-	// the first AllocationBlockSize*2 are new gen0 indexes
-	// the next AllocationBlockSize are gen1 or gen2
-	// the nextAllocationBlockSize are gen0
-	// this shows the deferement to break up indexes is working
-	for(int i = 0; i < AllocationBlockSize * 4;++i) {
-		Handle_Handle32 handle = Handle_Manager32Alloc(manager);
-		if(i < AllocationBlockSize * 2) {
-			REQUIRE(handle == i);
-		} else if( i < AllocationBlockSize * 3){
-			uint32_t index = AllocationBlockSize - (i - AllocationBlockSize*2) - 1;
-			REQUIRE(handle == (0x01000000 | index));
-		} else {
-			REQUIRE(handle == (i - AllocationBlockSize));
-		}
-		Handle_Manager32Release(manager, handle);
-	}
-	// we should hit the deferred backoff limit, so these should all be existing
-	// reused handles. the first 48 are reused so not gen0, the last 16 are gen0
-	for(int i = 0; i < AllocationBlockSize * 4;++i) {
-		if( i < AllocationBlockSize * 2) {
-			Handle_Handle32 handle = Handle_Manager32Alloc(manager);
-			REQUIRE((handle & 0xFF000000) != 0);
-		} else if( i < AllocationBlockSize * 3){
-			Handle_Handle32 handle = Handle_Manager32Alloc(manager);
-			REQUIRE((handle & 0xFF000000) != 0);
-		} else {
-			Handle_Handle32 handle = Handle_Manager32Alloc(manager);
-			REQUIRE((handle & 0xFF000000) == 0);
-		}
-	}
+	TestGenerations(AllocationBlockSize, manager);
+
 	Handle_Manager32Destroy(manager);
 }
 

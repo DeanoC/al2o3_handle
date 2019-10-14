@@ -3,9 +3,12 @@
 #include "al2o3_handle/handle.h"
 #include "al2o3_thread/thread.h"
 
+
 AL2O3_EXTERN_C Handle_Manager32Handle Handle_Manager32Create(size_t elementSize, size_t allocationBlockSize);
 AL2O3_EXTERN_C Handle_Manager32Handle Handle_Manager32CreateWithMutex(size_t elementSize, size_t allocationBlockSize, Thread_Mutex* mutex);
 AL2O3_EXTERN_C Handle_Manager32Handle Handle_Manager32CreateNoLocks(size_t elementSize, size_t allocationBlockSize);
+
+AL2O3_EXTERN_C Handle_Manager32Handle Handle_Manager32FixedSize(size_t elementSize, size_t totalHandleCount);
 
 AL2O3_EXTERN_C void Handle_Manager32Destroy(Handle_Manager32Handle manager);
 
