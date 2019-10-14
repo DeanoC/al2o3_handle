@@ -34,7 +34,8 @@ AL2O3_FORCE_INLINE bool CheckGeneration32(Handle_Manager32Handle manager, uint32
 	return (handleGen == *gen);
 }
 
-AL2O3_FORCE_INLINE void* ElementAddress32(Handle_Manager32Handle manager, uint32_t index) {
+AL2O3_FORCE_INLINE void* ElementAddress32(Handle_Manager32Handle manager, uint32_t handle) {
+	uint32_t const index = (handle & MaxHandles32Bit);
 	return ((uint8_t*) manager->baseHandleAddress) + (index * manager->elementSize);
 }
 
@@ -92,7 +93,7 @@ Redo:
 	Thread_AtomicStore32Relaxed(&manager->freeListHead, oldHandleCount);
 	Thread_AtomicFetchAdd32Relaxed(&manager->blockAllocatedSinceDeferredFlush, 1);
 
-	Thread_AtomicFetchAdd32Relaxed(&manager->handleAllocatedCount, newHandleCount);
+	Thread_AtomicStore32Relaxed(&manager->handleAllocatedCount, newHandleCount);
 }
 
 AL2O3_EXTERN_C Handle_Manager32Handle Handle_Manager32CreateWithMutex(size_t elementSize, size_t allocationBlockSize, Thread_Mutex* mutex) {
@@ -145,7 +146,7 @@ AL2O3_EXTERN_C Handle_Manager32Handle Handle_Manager32Create(size_t elementSize,
 	return manager;
 }
 
-AL2O3_EXTERN_C Handle_Manager32Handle Handle_Manager32FixedSize(size_t elementSize, size_t totalHandleCount) {
+AL2O3_EXTERN_C Handle_Manager32Handle Handle_Manager32CreateFixedSize(size_t elementSize, size_t totalHandleCount) {
 	Handle_Manager32Handle manager = Handle_Manager32CreateWithMutex(elementSize, totalHandleCount, NULL);
 	manager->fixed = true;
 	return manager;

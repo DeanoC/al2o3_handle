@@ -133,7 +133,7 @@ TEST_CASE("data access tests", "[al2o3 handle]") {
 	FillTest(&testData);
 
 	Handle_Handle32 dataHandle = Handle_Manager32Alloc(manager);
-	void * unsafePtr = Handle_Manager32ToPtrUnsafe(manager, dataHandle);
+	void * unsafePtr = Handle_Manager32ToPtr(manager, dataHandle);
 	// alloc always returns zero'ed data
 	REQUIRE(memcmp(unsafePtr, &zeroData, sizeof(Test)) == 0);
 	memcpy(unsafePtr, &testData, sizeof(Test));
@@ -146,10 +146,10 @@ TEST_CASE("data access tests", "[al2o3 handle]") {
 
 	dataHandle = Handle_Manager32Alloc(manager);
 	Handle_Manager32Lock(manager);
-	void* lockedPtr = Handle_Manager32ToPtrUnsafe(manager, dataHandle);
+	void* lockedPtr = Handle_Manager32ToPtr(manager, dataHandle);
 	REQUIRE(memcmp(lockedPtr, &zeroData, sizeof(Test)) == 0);
 	memcpy(lockedPtr, &testData, sizeof(Test));
-	Handle_Manager32ToPtrUnlock(manager);
+	Handle_Manager32Unlock(manager);
 
 	// now force a internal realloc and check the data is okay
 	for (int i = 0; i < AllocationBlockSize * 4; ++i) {
@@ -157,13 +157,13 @@ TEST_CASE("data access tests", "[al2o3 handle]") {
 	}
 
 	Handle_Manager32Lock(manager);
-	lockedPtr = Handle_Manager32ToPtrUnsafe(manager, dataHandle);
+	lockedPtr = Handle_Manager32ToPtr(manager, dataHandle);
 	REQUIRE(memcmp(lockedPtr, &testData, sizeof(Test)) == 0);
-	Handle_Manager32ToPtrUnlock(manager);
+	Handle_Manager32Unlock(manager);
 
 	dataHandle = Handle_Manager32Alloc(manager);
 	Handle_Manager32CopyFrom(manager, dataHandle, &testData);
-	unsafePtr = Handle_Manager32ToPtrUnsafe(manager, dataHandle);
+	unsafePtr = Handle_Manager32ToPtr(manager, dataHandle);
 	REQUIRE(memcmp(unsafePtr, &testData, sizeof(Test)) == 0);
 
 	Test copyTo;
@@ -245,7 +245,7 @@ TEST_CASE("data access tests  No Locks", "[al2o3 handle]") {
 	FillTest(&testData);
 
 	Handle_Handle32 dataHandle = Handle_Manager32Alloc(manager);
-	void * unsafePtr = Handle_Manager32ToPtrUnsafe(manager, dataHandle);
+	void * unsafePtr = Handle_Manager32ToPtr(manager, dataHandle);
 	// alloc always returns zero'ed data
 	REQUIRE(memcmp(unsafePtr, &zeroData, sizeof(Test)) == 0);
 	memcpy(unsafePtr, &testData, sizeof(Test));
@@ -258,10 +258,10 @@ TEST_CASE("data access tests  No Locks", "[al2o3 handle]") {
 
 	dataHandle = Handle_Manager32Alloc(manager);
 	Handle_Manager32Lock(manager);
-	void* lockedPtr = Handle_Manager32ToPtrUnsafe(manager, dataHandle);
+	void* lockedPtr = Handle_Manager32ToPtr(manager, dataHandle);
 	REQUIRE(memcmp(lockedPtr, &zeroData, sizeof(Test)) == 0);
 	memcpy(lockedPtr, &testData, sizeof(Test));
-	Handle_Manager32ToPtrUnlock(manager);
+	Handle_Manager32Unlock(manager);
 
 	// now force a internal realloc and check the data is okay
 	for (int i = 0; i < AllocationBlockSize * 4; ++i) {
@@ -269,13 +269,13 @@ TEST_CASE("data access tests  No Locks", "[al2o3 handle]") {
 	}
 
 	Handle_Manager32Lock(manager);
-	lockedPtr = Handle_Manager32ToPtrUnsafe(manager, dataHandle);
+	lockedPtr = Handle_Manager32ToPtr(manager, dataHandle);
 	REQUIRE(memcmp(lockedPtr, &testData, sizeof(Test)) == 0);
-	Handle_Manager32ToPtrUnlock(manager);
+	Handle_Manager32Unlock(manager);
 
 	dataHandle = Handle_Manager32Alloc(manager);
 	Handle_Manager32CopyFrom(manager, dataHandle, &testData);
-	unsafePtr = Handle_Manager32ToPtrUnsafe(manager, dataHandle);
+	unsafePtr = Handle_Manager32ToPtr(manager, dataHandle);
 	REQUIRE(memcmp(unsafePtr, &testData, sizeof(Test)) == 0);
 
 	Test copyTo;
@@ -286,7 +286,7 @@ TEST_CASE("data access tests  No Locks", "[al2o3 handle]") {
 }
 
 TEST_CASE("Basic tests Fixed", "[al2o3 handle]") {
-	Handle_Manager32Handle manager = Handle_Manager32FixedSize(sizeof(Test), 16);
+	Handle_Manager32Handle manager = Handle_Manager32CreateFixedSize(sizeof(Test), 16);
 	REQUIRE(manager);
 
 	Handle_Handle32 handle0 = Handle_Manager32Alloc(manager);
@@ -330,7 +330,7 @@ TEST_CASE("data access tests Fixed", "[al2o3 handle]") {
 	FillTest(&testData);
 
 	Handle_Handle32 dataHandle = Handle_Manager32Alloc(manager);
-	void * unsafePtr = Handle_Manager32ToPtrUnsafe(manager, dataHandle);
+	void * unsafePtr = Handle_Manager32ToPtr(manager, dataHandle);
 	// alloc always returns zero'ed data
 	REQUIRE(memcmp(unsafePtr, &zeroData, sizeof(Test)) == 0);
 	memcpy(unsafePtr, &testData, sizeof(Test));
@@ -342,22 +342,24 @@ TEST_CASE("data access tests Fixed", "[al2o3 handle]") {
 	REQUIRE(memcmp(unsafePtr, &testData, sizeof(Test)) != 0);
 
 	dataHandle = Handle_Manager32Alloc(manager);
-	void* lockedPtr = Handle_Manager32ToPtrLock(manager, dataHandle);
+	Handle_Manager32Lock(manager);
+	void* lockedPtr = Handle_Manager32ToPtr(manager, dataHandle);
 	REQUIRE(memcmp(lockedPtr, &zeroData, sizeof(Test)) == 0);
 	memcpy(lockedPtr, &testData, sizeof(Test));
-	Handle_Manager32ToPtrUnlock(manager);
+	Handle_Manager32Unlock(manager);
 
 	for (int i = 0; i < AllocationBlockSize * 4; ++i) {
 		Handle_Manager32Alloc(manager);
 	}
 
-	lockedPtr = Handle_Manager32ToPtrLock(manager, dataHandle);
+	Handle_Manager32Lock(manager);
+	lockedPtr = Handle_Manager32ToPtr(manager, dataHandle);
 	REQUIRE(memcmp(lockedPtr, &testData, sizeof(Test)) == 0);
-	Handle_Manager32ToPtrUnlock(manager);
+	Handle_Manager32Unlock(manager);
 
 	dataHandle = Handle_Manager32Alloc(manager);
 	Handle_Manager32CopyFrom(manager, dataHandle, &testData);
-	unsafePtr = Handle_Manager32ToPtrUnsafe(manager, dataHandle);
+	unsafePtr = Handle_Manager32ToPtr(manager, dataHandle);
 	REQUIRE(memcmp(unsafePtr, &testData, sizeof(Test)) == 0);
 
 	Test copyTo;
