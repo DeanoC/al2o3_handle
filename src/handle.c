@@ -11,20 +11,17 @@
 
 
 typedef struct Handle_Manager32 {
-	Thread_Mutex inbuiltMutex;
 	Thread_Mutex* mutexPtr;
-
 	uint32_t numHandlesInBlock;
 	size_t elementSize;
+	bool fixed;
 
 	void* baseHandleAddress;
 	uint8_t* baseHandleGen;
-
 	Thread_Atomic32_t freeListHead;
 
-	bool fixed;
 
-	uint32_t handleAllocatedCount;
+	Thread_Atomic32_t handleAllocatedCount;
 	Thread_Atomic32_t deferredFreeListHead;
 	Thread_Atomic32_t blockAllocatedSinceDeferredFlush;
 
@@ -44,11 +41,10 @@ AL2O3_FORCE_INLINE void* ElementAddress32(Handle_Manager32Handle manager, uint32
 // not thread safe, needs external synchronisation!
 static void Handle_ManagerNewHandleBlock32(Handle_Manager32Handle manager) {
 	ASSERT(manager);
+	ASSERT( Thread_AtomicLoad32Relaxed(&manager->freeListHead) == Handle_InvalidHandle32);
 
 	// we've built a bunch of deferred handles, so lets use them before allocating
 	// this only works due to the mutex its not atomic!
-	uint32_t index = Thread_AtomicLoad32Relaxed(&manager->freeListHead);
-	ASSERT(index == ~0);
 
 	// every time we add a new block of handles we also recycle the unused handles.
 	// this means there is at least NumHandlesInBlock allocations before a handle
@@ -63,7 +59,7 @@ static void Handle_ManagerNewHandleBlock32(Handle_Manager32Handle manager) {
 		uint32_t oldValue = 0;
 RedoD:
 		oldValue = Thread_AtomicLoad32Relaxed(&manager->deferredFreeListHead);
-		if( Thread_AtomicCompareExchange32Relaxed(&manager->deferredFreeListHead, oldValue, ~0u) != oldValue) {
+		if( Thread_AtomicCompareExchange32Relaxed(&manager->deferredFreeListHead, oldValue, Handle_InvalidHandle32) != oldValue) {
 			goto RedoD;
 		}
 
@@ -72,30 +68,31 @@ RedoD:
 		return;
 	}
 
-	size_t newHandleCount = manager->handleAllocatedCount + manager->numHandlesInBlock;
+	uint32_t oldHandleCount = Thread_AtomicLoad32Relaxed(&manager->handleAllocatedCount);
+	uint32_t newHandleCount = oldHandleCount + manager->numHandlesInBlock;
 	manager->baseHandleAddress = MEMORY_REALLOC(manager->baseHandleAddress, newHandleCount * manager->elementSize);
 	manager->baseHandleGen = (uint8_t*) MEMORY_REALLOC(manager->baseHandleGen, newHandleCount * sizeof(uint8_t));
 
 	// init free list for new block
 	for (uint32_t i = 0u; i < manager->numHandlesInBlock; ++i) {
-		uint32_t const index = manager->handleAllocatedCount + i;
+		uint32_t const index = oldHandleCount + i;
 		*((uint32_t*)ElementAddress32(manager, index)) = index + 1;
 		manager->baseHandleGen[index] = 0;
 	}
 	// fix last index to point to the deferred list as well
-	uint32_t* item = (uint32_t*)ElementAddress32(manager, manager->handleAllocatedCount + manager->numHandlesInBlock -1);
+	uint32_t* item = (uint32_t*)ElementAddress32(manager, newHandleCount - 1);
 Redo:
 	*item = Thread_AtomicLoad32Relaxed(&manager->deferredFreeListHead);
 	uint32_t const oldValue = *item;
-	if( Thread_AtomicCompareExchange32Relaxed(&manager->deferredFreeListHead, oldValue, index) != oldValue) {
+	if( Thread_AtomicCompareExchange32Relaxed(&manager->deferredFreeListHead, oldValue, Handle_InvalidHandle32) != oldValue) {
 		goto Redo;
 	}
 
 	// repoint head to start of the new block
-	Thread_AtomicStore32Relaxed(&manager->freeListHead, manager->handleAllocatedCount);
+	Thread_AtomicStore32Relaxed(&manager->freeListHead, oldHandleCount);
 	Thread_AtomicFetchAdd32Relaxed(&manager->blockAllocatedSinceDeferredFlush, 1);
 
-	manager->handleAllocatedCount = (uint32_t)newHandleCount;
+	Thread_AtomicFetchAdd32Relaxed(&manager->handleAllocatedCount, newHandleCount);
 }
 
 AL2O3_EXTERN_C Handle_Manager32Handle Handle_Manager32CreateWithMutex(size_t elementSize, size_t allocationBlockSize, Thread_Mutex* mutex) {
@@ -107,10 +104,13 @@ AL2O3_EXTERN_C Handle_Manager32Handle Handle_Manager32CreateWithMutex(size_t ele
 
 	manager->numHandlesInBlock = (uint32_t) allocationBlockSize;
 	manager->elementSize = elementSize;
-	Thread_AtomicStore32Relaxed(&manager->freeListHead, ~0u);
-	Thread_AtomicStore32Relaxed(&manager->deferredFreeListHead, ~0u);
+	Thread_AtomicStore32Relaxed(&manager->freeListHead, Handle_InvalidHandle32);
+	Thread_AtomicStore32Relaxed(&manager->deferredFreeListHead, Handle_InvalidHandle32);
 
 	Handle_ManagerNewHandleBlock32(manager);
+
+	// make index 0 start at gen 0, means a 0 handle is always invalid
+	manager->baseHandleGen[0] = 1;
 
 	MUTEX_UNLOCK
 
@@ -124,18 +124,21 @@ AL2O3_EXTERN_C Handle_Manager32Handle Handle_Manager32CreateNoLocks(size_t eleme
 
 AL2O3_EXTERN_C Handle_Manager32Handle Handle_Manager32Create(size_t elementSize, size_t allocationBlockSize) {
 	ASSERT(elementSize >= sizeof(uint32_t));
-	Handle_Manager32Handle manager = (Handle_Manager32Handle) MEMORY_CALLOC(1, sizeof(Handle_Manager32));
-	Thread_MutexCreate(&manager->inbuiltMutex);
-	manager->mutexPtr = &manager->inbuiltMutex;
+	Handle_Manager32Handle manager = (Handle_Manager32Handle) MEMORY_CALLOC(1, sizeof(Handle_Manager32) + sizeof(Thread_Mutex));
+	manager->mutexPtr = (Thread_Mutex*)(manager + 1);
+	Thread_MutexCreate(manager->mutexPtr);
 
 	MUTEX_LOCK
 
 	manager->numHandlesInBlock = (uint32_t) allocationBlockSize;
 	manager->elementSize = elementSize;
-	Thread_AtomicStore32Relaxed(&manager->freeListHead, ~0u);
-	Thread_AtomicStore32Relaxed(&manager->deferredFreeListHead, ~0u);
+	Thread_AtomicStore32Relaxed(&manager->freeListHead, Handle_InvalidHandle32);
+	Thread_AtomicStore32Relaxed(&manager->deferredFreeListHead, Handle_InvalidHandle32);
 
 	Handle_ManagerNewHandleBlock32(manager);
+
+	// make index 0 start at gen 0, means a 0 handle is always invalid
+	manager->baseHandleGen[0] = 1;
 
 	MUTEX_UNLOCK
 
@@ -155,57 +158,58 @@ AL2O3_EXTERN_C void Handle_Manager32Destroy(Handle_Manager32Handle manager) {
 	MEMORY_FREE(manager->baseHandleAddress);
 	MEMORY_FREE(manager->baseHandleGen);
 
-	if (manager->mutexPtr == &manager->inbuiltMutex) {
-		Thread_MutexDestroy(&manager->inbuiltMutex);
+	if (manager->mutexPtr == (Thread_Mutex*)(manager + 1)) {
+		Thread_MutexDestroy(manager->mutexPtr);
 	}
 
 	MEMORY_FREE(manager);
 }
 
-
+// lock free except non fixed manager needs to allocate more handles
 AL2O3_EXTERN_C Handle_Handle32 Handle_Manager32Alloc(Handle_Manager32Handle manager) {
 
-	uint32_t index = 0;
-RedoAllocation:
+RedoAllocation:;
 	// first we check if the some free on the free list
-	index = Thread_AtomicLoad32Relaxed(&manager->freeListHead);
-	if(index != ~0u) {
+	uint32_t const index = Thread_AtomicLoad32Relaxed(&manager->freeListHead);
+	if(index != Handle_InvalidHandle32) {
+		// pop head and return it
 		uint32_t* item = (uint32_t*)ElementAddress32(manager, index);
 		if( Thread_AtomicCompareExchange32Relaxed(&manager->freeListHead, index, *item) != index) {
 			goto RedoAllocation;
 		}
-		// pop head and return it
-		ASSERT((index & ~MaxHandles32Bit) == 0);
 
+		ASSERT((index & ~MaxHandles32Bit) == 0);
 		memset(item, 0, manager->elementSize);
 
 		// now make the handle
 		uint8_t* gen = manager->baseHandleGen + index;
-
 		return index | ((uint32_t)*gen) << 24u;
+
 	} else {
+		// free list is empty on fixed we can swap deferred to free safely without a lock
 		if(manager->fixed) {
-			if(Thread_AtomicLoad32Relaxed(&manager->deferredFreeListHead) == ~0u) {
+			if(Thread_AtomicLoad32Relaxed(&manager->deferredFreeListHead) == Handle_InvalidHandle32) {
 				// we've have got no free handles to give!
 				LOGERROR("Fixed sized handle managers has run out of handles");
-				return ~0u;
+				return Handle_InvalidHandle32;
 			}
 			// swap in the deferred list
 RedoD0:;
 			// delink the deferred free list atomically
 			uint32_t const curDefFreeList = Thread_AtomicLoad32Relaxed(&manager->deferredFreeListHead);
-			if (Thread_AtomicCompareExchange32Relaxed(&manager->deferredFreeListHead, curDefFreeList, ~0u) != curDefFreeList) {
+			if (Thread_AtomicCompareExchange32Relaxed(&manager->deferredFreeListHead, curDefFreeList, Handle_InvalidHandle32) != curDefFreeList) {
 				goto RedoD0;
 			}
 RedoD1:;
 			// new atomicly chain the delinked deferred into the free list
 			uint32_t const curFreeList = Thread_AtomicLoad32Relaxed(&manager->deferredFreeListHead);
-			if (Thread_AtomicCompareExchange32Relaxed(&manager->deferredFreeListHead, curDefFreeList, curDefFreeList) != curFreeList) {
+			if (Thread_AtomicCompareExchange32Relaxed(&manager->deferredFreeListHead, curFreeList, curDefFreeList) != curFreeList) {
 				goto RedoD1;
 			}
 			goto RedoAllocation;
 		}
 
+		// non fixed and we need to allocate take lock to do it
 		MUTEX_LOCK
 		// allocate a new block and then redo
 		Handle_ManagerNewHandleBlock32(manager);
@@ -215,11 +219,9 @@ RedoD1:;
 	}
 
 }
-
-// TODO possibly release only needs to take a mutex versus allocation if atomic
-// are used or at least a smaller mutex against other releases and locks.
+// lock free in all cases!
 AL2O3_EXTERN_C void Handle_Manager32Release(Handle_Manager32Handle manager, Handle_Handle32 handle) {
-	ASSERT((handle & MaxHandles32Bit)  < manager->handleAllocatedCount );
+	ASSERT((handle & MaxHandles32Bit)  < Thread_AtomicLoad32Relaxed(&manager->handleAllocatedCount) );
 	ASSERT( CheckGeneration32(manager, handle));
 
 	uint32_t index = (handle & MaxHandles32Bit);
@@ -238,34 +240,31 @@ Redo:
 }
 
 AL2O3_EXTERN_C bool Handle_Manager32IsValid(Handle_Manager32Handle manager, Handle_Handle32 handle) {
-	MUTEX_LOCK
-
-	bool valid = CheckGeneration32(manager, handle);
-
-	MUTEX_UNLOCK
-	return valid;
+	return CheckGeneration32(manager, handle);
 }
 
-AL2O3_EXTERN_C void* Handle_Manager32ToPtrUnsafe(Handle_Manager32Handle manager, Handle_Handle32 handle) {
+AL2O3_EXTERN_C void* Handle_Manager32ToPtr(Handle_Manager32Handle manager, Handle_Handle32 handle) {
 	ASSERT(CheckGeneration32(manager, handle));
 	return ElementAddress32(manager, handle);
 }
 
-AL2O3_EXTERN_C void* Handle_Manager32ToPtrLock(Handle_Manager32Handle manager, Handle_Handle32 handle){
+AL2O3_EXTERN_C void Handle_Manager32Lock(Handle_Manager32Handle manager){
 	MUTEX_LOCK
-
-	ASSERT(CheckGeneration32(manager, handle));
-
-	return ElementAddress32(manager, handle);
 }
 
-AL2O3_EXTERN_C void Handle_Manager32ToPtrUnlock(Handle_Manager32Handle manager) {
+AL2O3_EXTERN_C void Handle_Manager32Unlock(Handle_Manager32Handle manager) {
 	MUTEX_UNLOCK
+}
+
+AL2O3_EXTERN_C bool Handle_Manager32IsLockFree(Handle_Manager32Handle manager) {
+	return (manager->fixed || manager->mutexPtr == NULL);
 }
 
 AL2O3_EXTERN_C void Handle_Manager32CopyTo(Handle_Manager32Handle manager, Handle_Handle32 handle, void* dst) {
-	MUTEX_LOCK
+
 	ASSERT(CheckGeneration32(manager, handle));
+
+	MUTEX_LOCK
 
 	memcpy(dst, ElementAddress32(manager, handle), manager->elementSize);
 
@@ -273,9 +272,9 @@ AL2O3_EXTERN_C void Handle_Manager32CopyTo(Handle_Manager32Handle manager, Handl
 }
 
 AL2O3_EXTERN_C void Handle_Manager32CopyFrom(Handle_Manager32Handle manager, Handle_Handle32 handle, void const* src) {
-	MUTEX_LOCK
-
 	ASSERT(CheckGeneration32(manager, handle));
+
+	MUTEX_LOCK
 
 	memcpy(ElementAddress32(manager, handle), src, manager->elementSize);
 

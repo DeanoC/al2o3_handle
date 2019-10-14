@@ -44,8 +44,14 @@ static void TestGenerations(int const AllocationBlockSize, Handle_Manager32 *man
 		for(uint32_t j = start * AllocationBlockSize; j < end * AllocationBlockSize;++j) {
 			Handle_Handle32 handle = Handle_Manager32Alloc(manager);
 			bool isZeroGen = (handle & 0xFF000000) == 0;
-			//			LOGINFO("%i : %i expected %i", j / AllocationBlockSize, handle >> 24, !shouldBeZeroGen);
-			REQUIRE(isZeroGen == shouldBeZeroGen);
+
+			// 0th index is 1 gen old to make 0 handle illegal
+			if(j == 0) {
+				REQUIRE(isZeroGen == false);
+			} else {
+				//			LOGINFO("%i : %i expected %i", j / AllocationBlockSize, handle >> 24, !shouldBeZeroGen);
+				REQUIRE(isZeroGen == shouldBeZeroGen);
+			}
 			Handle_Manager32Release(manager, handle);
 		}
 
@@ -59,7 +65,7 @@ TEST_CASE("Basic tests", "[al2o3 handle]") {
 	REQUIRE(manager);
 
 	Handle_Handle32 handle0 = Handle_Manager32Alloc(manager);
-	REQUIRE(handle0 == 0);
+	REQUIRE(handle0 == 0x01000000);
 	Handle_Manager32Release(manager, handle0);
 	Handle_Handle32 handle1 = Handle_Manager32Alloc(manager);
 	REQUIRE(handle1 == 1);
@@ -75,7 +81,11 @@ TEST_CASE("Block allocation tests", "[al2o3 handle]") {
 
 	for(int i =0 ; i < AllocationBlockSize * 4;++i) {
 		Handle_Handle32 handle = Handle_Manager32Alloc(manager);
-		REQUIRE(handle == i);
+		if( i == 0) {
+			REQUIRE(handle == 0x01000000);
+		} else {
+			REQUIRE(handle == i);
+		}
 	}
 
 	Handle_Manager32Destroy(manager);
@@ -168,7 +178,7 @@ TEST_CASE("Basic tests No Locks", "[al2o3 handle]") {
 	REQUIRE(manager);
 
 	Handle_Handle32 handle0 = Handle_Manager32Alloc(manager);
-	REQUIRE(handle0 == 0);
+	REQUIRE(handle0 == 0x01000000);
 	Handle_Manager32Release(manager, handle0);
 	Handle_Handle32 handle1 = Handle_Manager32Alloc(manager);
 	REQUIRE(handle1 == 1);
@@ -184,7 +194,11 @@ TEST_CASE("Block allocation tests  No Locks", "[al2o3 handle]") {
 
 	for(int i =0 ; i < AllocationBlockSize * 4;++i) {
 		Handle_Handle32 handle = Handle_Manager32Alloc(manager);
-		REQUIRE(handle == i);
+		if( i == 0) {
+			REQUIRE(handle == 0x01000000);
+		} else {
+			REQUIRE(handle == i);
+		}
 	}
 
 	Handle_Manager32Destroy(manager);
@@ -276,7 +290,7 @@ TEST_CASE("Basic tests Fixed", "[al2o3 handle]") {
 	REQUIRE(manager);
 
 	Handle_Handle32 handle0 = Handle_Manager32Alloc(manager);
-	REQUIRE(handle0 == 0);
+	REQUIRE(handle0 == 0x01000000);
 	Handle_Manager32Release(manager, handle0);
 	Handle_Handle32 handle1 = Handle_Manager32Alloc(manager);
 	REQUIRE(handle1 == 1);
