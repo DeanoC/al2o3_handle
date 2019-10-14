@@ -21,12 +21,30 @@ AL2O3_EXTERN_C bool Handle_Manager32IsValid(Handle_Manager32Handle manager, Hand
 // invalid!
 AL2O3_EXTERN_C void* Handle_Manager32ToPtrUnsafe(Handle_Manager32Handle manager, Handle_Handle32 handle);
 
-// these will return data ptr but will block until unlock any allocation/release on another thread
-// not Unlock will break everything!
-AL2O3_EXTERN_C void* Handle_Manager32ToPtrLock(Handle_Manager32Handle manager, Handle_Handle32 handle);
-AL2O3_EXTERN_C void Handle_Manager32ToPtrUnlock(Handle_Manager32Handle manager);
+// during the lock unsafe becomes safe but allocs and releases will stall
+AL2O3_EXTERN_C void Handle_Manager32Lock(Handle_Manager32Handle manager);
+AL2O3_EXTERN_C void Handle_Manager32Unlock(Handle_Manager32Handle manager);
 
 // these are safest but copy the data to from then handle actual data rather than direct access
 AL2O3_EXTERN_C void Handle_Manager32CopyTo(Handle_Manager32Handle manager, Handle_Handle32 handle, void* dst);
 AL2O3_EXTERN_C void Handle_Manager32CopyFrom(Handle_Manager32Handle manager, Handle_Handle32 handle, void const* src);
 
+#if __cplusplus
+struct Handle_Manager32ScopedLock {
+	Handle_Manager32ScopedLock(Handle_Manager32Handle man) : manager(man) {
+		Handle_Manager32Lock(manager);
+	}
+
+	~Handle_Manager32ScopedLock() {
+		Handle_Manager32Unlock(manager);
+	}
+
+	/// Prevent copy construction.
+	Handle_Manager32ScopedLock(const Handle_Manager32ScopedLock& rhs) = delete;
+	/// Prevent assignment.
+	Handle_Manager32ScopedLock& operator=(const Handle_Manager32ScopedLock& rhs) = delete;
+
+	Handle_Manager32Handle manager;
+};
+
+#endif
