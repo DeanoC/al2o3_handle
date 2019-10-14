@@ -166,7 +166,6 @@ AL2O3_EXTERN_C void Handle_Manager32Destroy(Handle_Manager32Handle manager) {
 AL2O3_EXTERN_C Handle_Handle32 Handle_Manager32Alloc(Handle_Manager32Handle manager) {
 
 	uint32_t index = 0;
-
 RedoAllocation:
 	// first we check if the some free on the free list
 	index = Thread_AtomicLoad32Relaxed(&manager->freeListHead);
@@ -186,7 +185,25 @@ RedoAllocation:
 		return index | ((uint32_t)*gen) << 24u;
 	} else {
 		if(manager->fixed) {
-			return (Handle_Handle32)0xFFFFFFFFFu;
+			if(Thread_AtomicLoad32Relaxed(&manager->deferredFreeListHead) == ~0u) {
+				// we've have got no free handles to give!
+				LOGERROR("Fixed sized handle managers has run out of handles");
+				return ~0u;
+			}
+			// swap in the deferred list
+RedoD0:
+			// delink the deferred free list atomically
+			uint32_t const curDefFreeList = Thread_AtomicLoad32Relaxed(&manager->deferredFreeListHead);
+			if (Thread_AtomicCompareExchange32Relaxed(&manager->deferredFreeListHead, curDefFreeList, ~0u) != curDefFreeList) {
+				goto RedoD0;
+			}
+RedoD1:
+			// new atomicly chain the delinked deferred into the free list
+			uint32_t const curFreeList = Thread_AtomicLoad32Relaxed(&manager->deferredFreeListHead);
+			if (Thread_AtomicCompareExchange32Relaxed(&manager->deferredFreeListHead, curDefFreeList, curDefFreeList) != curFreeList) {
+				goto RedoD1;
+			}
+			goto RedoAllocation;
 		}
 
 		MUTEX_LOCK
@@ -211,22 +228,12 @@ AL2O3_EXTERN_C void Handle_Manager32Release(Handle_Manager32Handle manager, Hand
 	uint8_t* gen = manager->baseHandleGen + index;
 	*gen = *gen + 1;
 
-	if(manager->fixed) {
-		// add it to the free list immediately for fixed sized handle manager
-RedoF:
-		*item = Thread_AtomicLoad32Relaxed(&manager->freeListHead);
-		uint32_t const oldValue = *item;
-		if (Thread_AtomicCompareExchange32Relaxed(&manager->freeListHead, oldValue, index) != oldValue) {
-			goto RedoF;
-		}
-	} else {
-		// add it to the deferred list
+	// add it to the deferred list
 Redo:
-		*item = Thread_AtomicLoad32Relaxed(&manager->deferredFreeListHead);
-		uint32_t const oldValue = *item;
-		if (Thread_AtomicCompareExchange32Relaxed(&manager->deferredFreeListHead, oldValue, index) != oldValue) {
-			goto Redo;
-		}
+	*item = Thread_AtomicLoad32Relaxed(&manager->deferredFreeListHead);
+	uint32_t const oldValue = *item;
+	if (Thread_AtomicCompareExchange32Relaxed(&manager->deferredFreeListHead, oldValue, index) != oldValue) {
+		goto Redo;
 	}
 }
 
