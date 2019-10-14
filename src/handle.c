@@ -95,7 +95,7 @@ Redo:
 	Thread_AtomicStore32Relaxed(&manager->freeListHead, manager->handleAllocatedCount);
 	Thread_AtomicFetchAdd32Relaxed(&manager->blockAllocatedSinceDeferredFlush, 1);
 
-	manager->handleAllocatedCount = newHandleCount;
+	manager->handleAllocatedCount = (uint32_t)newHandleCount;
 }
 
 AL2O3_EXTERN_C Handle_Manager32Handle Handle_Manager32CreateWithMutex(size_t elementSize, size_t allocationBlockSize, Thread_Mutex* mutex) {
@@ -105,7 +105,7 @@ AL2O3_EXTERN_C Handle_Manager32Handle Handle_Manager32CreateWithMutex(size_t ele
 
 	MUTEX_LOCK
 
-	manager->numHandlesInBlock = allocationBlockSize;
+	manager->numHandlesInBlock = (uint32_t) allocationBlockSize;
 	manager->elementSize = elementSize;
 	Thread_AtomicStore32Relaxed(&manager->freeListHead, ~0u);
 	Thread_AtomicStore32Relaxed(&manager->deferredFreeListHead, ~0u);
@@ -130,7 +130,7 @@ AL2O3_EXTERN_C Handle_Manager32Handle Handle_Manager32Create(size_t elementSize,
 
 	MUTEX_LOCK
 
-	manager->numHandlesInBlock = allocationBlockSize;
+	manager->numHandlesInBlock = (uint32_t) allocationBlockSize;
 	manager->elementSize = elementSize;
 	Thread_AtomicStore32Relaxed(&manager->freeListHead, ~0u);
 	Thread_AtomicStore32Relaxed(&manager->deferredFreeListHead, ~0u);
