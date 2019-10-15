@@ -373,7 +373,7 @@ RedoF:;
 		}
 		if (*gen == 0) {
 			Handle_Manager32Dynamic *dyna = (Handle_Manager32Dynamic *) manager;
-Redo1:
+Redo1:;
 			// add to the delayed reuse list
 			uint32_t *item = (uint32_t *) ElementAddress32(manager, index);
 			*item = Thread_AtomicLoad32Relaxed(&dyna->delayedFreeListHead);
