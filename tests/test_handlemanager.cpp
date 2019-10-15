@@ -507,13 +507,13 @@ TEST_CASE(" Multithreaded", "[al2o3 handle]") {
 	LOGINFO("Starting multithread stress handle manager test - takes a while");
 	static const uint32_t startingSize = 1024 * 1;
 	static const uint32_t blockSize = 16;
-	static const uint32_t numThreads = Thread_CPUCoreCount() * 5;
+	const uint32_t numThreads = Thread_CPUCoreCount() * 5;
 	Handle_Manager32Handle manager = Handle_Manager32Create(sizeof(uint64_t), startingSize, blockSize);
 	REQUIRE(manager);
 
 	Thread_AtomicStore64Relaxed(&leaked, 0);
 
-	Thread_Thread threads[numThreads];
+	Thread_Thread * threads = (Thread_Thread *)STACK_ALLOC(sizeof(Thread_Thread) * numThreads);
 
 	for (auto i = 0u; i < numThreads; ++i) {
 		Thread_ThreadCreate(threads + i, &ThreadFuncDynamic, manager);
@@ -533,14 +533,14 @@ TEST_CASE("Multithreaded Fixed", "[al2o3 handle]") {
 
 	LOGINFO("Starting multithread stress fixed handle manager test - takes a while");
 
-	static const uint32_t totalSize = 1024 * 30;
+	static const uint32_t totalSize = 1024 * 50;
 	static const uint32_t numThreads = Thread_CPUCoreCount() * 5;
 	Handle_Manager32Handle manager = Handle_Manager32CreateFixedSize(sizeof(uint64_t), totalSize);
 	REQUIRE(manager);
 
 	Thread_AtomicStore64Relaxed(&leaked, 0);
 
-	Thread_Thread threads[numThreads];
+	Thread_Thread * threads = (Thread_Thread *)STACK_ALLOC(sizeof(Thread_Thread) * numThreads);
 
 	for (auto i = 0u; i < numThreads; ++i) {
 		Thread_ThreadCreate(threads + i, &ThreadFuncFixed, manager);

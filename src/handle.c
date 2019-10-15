@@ -78,7 +78,7 @@ AL2O3_FORCE_INLINE void *ElementAddress32(Handle_Manager32Handle manager, uint32
 }
 
 // not thread safe, needs external synchronisation!
-static void Handle_ManagerBaseNewHandleBlock32(Handle_Manager32 *manager, size_t numHandlesInBlock) {
+static void Handle_ManagerBaseNewHandleBlock32(Handle_Manager32 *manager, uint32_t numHandlesInBlock) {
 	ASSERT(manager);
 
 	// under a mutex or at initalisation so this is safe
@@ -116,7 +116,7 @@ static void Handle_ManagerBaseNewHandleBlock32(Handle_Manager32 *manager, size_t
 }
 
 // not thread safe, needs external synchronisation!
-static void Handle_ManagerNewHandleBlock32(Handle_Manager32Dynamic *manager, size_t numHandlesInBlock) {
+static void Handle_ManagerNewHandleBlock32(Handle_Manager32Dynamic *manager, uint32_t numHandlesInBlock) {
 	ASSERT(manager);
 	uint64_t heads = Thread_AtomicLoad64Relaxed(&manager->freeListHeads);
 	if(FREELIST_PART(heads) != Handle_InvalidHandle32) {
@@ -187,7 +187,7 @@ AL2O3_EXTERN_C Handle_Manager32Handle Handle_Manager32CreateWithMutex(size_t ele
 	Thread_AtomicStore64Relaxed(&manager->freeListHeads, 0); // this is actually 2 invalids
 	Thread_AtomicStore32Relaxed(&manager->delayedFreeListHead, Handle_InvalidHandle32);
 
-	Handle_ManagerNewHandleBlock32(manager, startingSize);
+	Handle_ManagerNewHandleBlock32(manager, (uint32_t)startingSize);
 
 	// make index 0 start at gen 0, means a 0 handle is always invalid
 	manager->baseHandleGen[0] = 1;
@@ -217,7 +217,7 @@ AL2O3_EXTERN_C Handle_Manager32Handle Handle_Manager32Create(size_t elementSize,
 	Thread_AtomicStore64Relaxed(&manager->freeListHeads, 0); // this is actually 2 invalids
 	Thread_AtomicStore32Relaxed(&manager->delayedFreeListHead, Handle_InvalidHandle32);
 
-	Handle_ManagerNewHandleBlock32(manager, startingSize);
+	Handle_ManagerNewHandleBlock32(manager, (uint32_t) startingSize);
 
 	// make index 0 start at gen 0, means a 0 handle is always invalid
 	manager->baseHandleGen[0] = 1;
@@ -236,7 +236,7 @@ AL2O3_EXTERN_C Handle_Manager32Handle Handle_Manager32CreateFixedSize(size_t ele
 	manager->elementSize = elementSize;
 	Thread_AtomicStore64Relaxed(&manager->freeListHeads, 0); // this is actually 2 invalids
 
-	Handle_ManagerBaseNewHandleBlock32(manager, totalHandleCount);
+	Handle_ManagerBaseNewHandleBlock32(manager, (uint32_t)totalHandleCount);
 
 	// make index 0 start at gen 0, means a 0 handle is always invalid
 	manager->baseHandleGen[0] = 1;
@@ -273,7 +273,7 @@ AL2O3_EXTERN_C Handle_Handle32 Handle_Manager32Alloc(Handle_Manager32Handle mana
 	// and we restart the operation
 
 	uint32_t noFreeCount = 0;
-	RedoD0:;
+RedoD0:;
 	// delink the deferred free list atomically
 	uint64_t const heads = Thread_AtomicLoad64Relaxed(&manager->freeListHeads);
 	uint64_t newHeads;
@@ -312,8 +312,13 @@ AL2O3_EXTERN_C Handle_Handle32 Handle_Manager32Alloc(Handle_Manager32Handle mana
 	} else {
 		// in this case we look up the next entry in the list without
 		// changeing the deferred list
-		uint64_t index = FREELIST_PART(heads);
+		uint32_t index = (uint32_t) FREELIST_PART(heads);
+		Handle_Manager32Dynamic *dyna = (Handle_Manager32Dynamic *) manager;
+		// this is annoying!
+		MUTEX_LOCK(dyna)
 		uint32_t *item = (uint32_t *) ElementAddress32(manager, index);
+		MUTEX_UNLOCK(dyna)
+
 		newHeads = ((uint64_t) DFREELIST_PART(heads)) << 32ull | *item;
 
 		if (Thread_AtomicCompareExchange64Relaxed(&manager->freeListHeads, heads, newHeads) != heads) {
@@ -327,44 +332,72 @@ AL2O3_EXTERN_C Handle_Handle32 Handle_Manager32Alloc(Handle_Manager32Handle mana
 		return index | ((uint32_t) *gen) << 24u;
 	}
 }
-// lock free in all cases!
+
 AL2O3_EXTERN_C void Handle_Manager32Release(Handle_Manager32Handle manager, Handle_Handle32 handle) {
-	ASSERT(CheckGeneration32(manager, handle));
 	ASSERT((handle & MaxHandles32Bit) < Thread_AtomicLoad32Relaxed(&manager->handleAllocatedCount));
 
 	uint32_t index = (handle & MaxHandles32Bit);
-	uint32_t *item = (uint32_t *) ElementAddress32(manager, index);
-	// update the generation of this index
-	uint8_t *gen = manager->baseHandleGen + index;
-	// intentional 8 bit integer overflow
-	*gen = *gen + 1;
-	if (*gen == 0 && index == 0) {
-		*gen = 1;
-	}
 
-	index |= 0xFF000000; // marker
-
-	if (!manager->fixed && *gen == 0) {
-		Handle_Manager32Dynamic *dyna = (Handle_Manager32Dynamic *) manager;
-		// add to the delayed reuse list
-		Redo1:
-		*item = Thread_AtomicLoad32Relaxed(&dyna->delayedFreeListHead);
-		uint32_t const oldValue = *item;
-		if (Thread_AtomicCompareExchange32Relaxed(&dyna->delayedFreeListHead, oldValue, index) != oldValue) {
-			goto Redo1;
+	uint8_t *gen;
+	if(manager->fixed) {
+		ASSERT(CheckGeneration32(manager, handle));
+		gen = manager->baseHandleGen + index;
+		// update the generation of this index
+		// intentional 8 bit integer overflow
+		*gen = *gen + 1;
+		if (*gen == 0 && index == 0) {
+			*gen = 1;
 		}
-		return;
-	}
+		uint64_t markerIndex = ((uint64_t)index | 0xFF000000ull) << 32ull; // marker
+		uint32_t* item = (uint32_t *) ElementAddress32(manager, index);
+RedoF:;
+		// add it to the deferred list without changing the free list
+		uint64_t const heads = Thread_AtomicLoad64Relaxed(&manager->freeListHeads);
+		*item = DFREELIST_PART(heads);
+		uint64_t flp = FREELIST_PART(heads);
+		uint64_t const newHeads = markerIndex | flp;
 
-	// add it to the deferred list without changing the free list
-	Redo:;
-	uint64_t const heads = Thread_AtomicLoad64Relaxed(&manager->freeListHeads);
-	*item = DFREELIST_PART(heads);
-	uint64_t flp = FREELIST_PART(heads);
-	uint64_t const newHeads = ((uint64_t) index) << 32ull | flp;
+		if (Thread_AtomicCompareExchange64Relaxed(&manager->freeListHeads, heads, newHeads) != heads) {
+			goto RedoF;
+		}
+	} else {
+		Handle_Manager32Dynamic *dyna = (Handle_Manager32Dynamic *) manager;
+		MUTEX_LOCK(dyna)
+		ASSERT(CheckGeneration32(manager, handle));
+		gen = manager->baseHandleGen + index;
+		// update the generation of this index
+		// intentional 8 bit integer overflow
+		*gen = *gen + 1;
+		if (*gen == 0 && index == 0) {
+			*gen = 1;
+		}
+		if (*gen == 0) {
+			Handle_Manager32Dynamic *dyna = (Handle_Manager32Dynamic *) manager;
+Redo1:
+			// add to the delayed reuse list
+			uint32_t *item = (uint32_t *) ElementAddress32(manager, index);
+			*item = Thread_AtomicLoad32Relaxed(&dyna->delayedFreeListHead);
+			uint32_t const oldValue = *item;
+			if (Thread_AtomicCompareExchange32Relaxed(&dyna->delayedFreeListHead, oldValue, index) != oldValue) {
+				goto Redo1;
+			}
+			MUTEX_UNLOCK(dyna)
+			return;
+		}
+		uint32_t markerIndex = index | 0xFF000000; // marker
+Redo:;
+		// add it to the deferred list without changing the free list
+		uint32_t* item = (uint32_t *) ElementAddress32(manager, index);
+		uint64_t const heads = Thread_AtomicLoad64Relaxed(&manager->freeListHeads);
+		*item = DFREELIST_PART(heads);
+		uint64_t flp = FREELIST_PART(heads);
+		uint64_t const newHeads = ((uint64_t) markerIndex) << 32ull | flp;
 
-	if (Thread_AtomicCompareExchange64Relaxed(&manager->freeListHeads, heads, newHeads) != heads) {
-		goto Redo;
+		if (Thread_AtomicCompareExchange64Relaxed(&manager->freeListHeads, heads, newHeads) != heads) {
+			goto Redo;
+		}
+
+		MUTEX_UNLOCK(dyna)
 	}
 }
 
@@ -423,14 +456,15 @@ AL2O3_EXTERN_C uint32_t Handle_Manager32HandleAllocatedCount(Handle_Manager32Han
 }
 
 AL2O3_EXTERN_C void Handle_Manager32CopyTo(Handle_Manager32Handle manager, Handle_Handle32 handle, void *dst) {
-	ASSERT(CheckGeneration32(manager, handle));
 
 	if (Handle_Manager32IsLockFree(manager)) {
+		ASSERT(CheckGeneration32(manager, handle));
 		memcpy(dst, ElementAddress32(manager, handle), manager->elementSize);
 	} else {
 		Handle_Manager32Dynamic *dyna = (Handle_Manager32Dynamic *) manager;
 
 		MUTEX_LOCK(dyna)
+		ASSERT(CheckGeneration32(manager, handle));
 
 		memcpy(dst, ElementAddress32(manager, handle), manager->elementSize);
 
@@ -439,13 +473,15 @@ AL2O3_EXTERN_C void Handle_Manager32CopyTo(Handle_Manager32Handle manager, Handl
 }
 
 AL2O3_EXTERN_C void Handle_Manager32CopyFrom(Handle_Manager32Handle manager, Handle_Handle32 handle, void const *src) {
-	ASSERT(CheckGeneration32(manager, handle));
 
 	if (Handle_Manager32IsLockFree(manager)) {
+		ASSERT(CheckGeneration32(manager, handle));
 		memcpy(ElementAddress32(manager, handle), src, manager->elementSize);
 	} else {
 		Handle_Manager32Dynamic *dyna = (Handle_Manager32Dynamic *) manager;
 		MUTEX_LOCK(dyna)
+
+		ASSERT(CheckGeneration32(manager, handle));
 
 		memcpy(ElementAddress32(manager, handle), src, manager->elementSize);
 
