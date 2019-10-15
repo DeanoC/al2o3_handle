@@ -1,6 +1,6 @@
-![](https://github.com/DeanoC/TEMPLATE_LIB/Build/badge.svg)
-![](https://github.com/DeanoC/TEMPLATE_LIB/Test/badge.svg)
+![](https://github.com/DeanoC/al2o3_handle/Build/badge.svg)
+![](https://github.com/DeanoC/al2o3_handle/Test/badge.svg)
 
 
-# template_lib
+# Handle Manager
 Just my template repo
