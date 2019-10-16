@@ -44,15 +44,16 @@ typedef struct Handle_Manager32 {
 	uint8_t	isLockless; // FALSE is lock calla can be ommited
 } Handle_Manager32;
 
+// global vtable register, used function below to modify and get
+AL2O3_EXTERN_C Handle_Manager32VTable* Handle_Manager32VTableGlobal[256];
+
 // vtable pointers must stay alive for the duration of calls into Handle_Manager(can be reset to NULL)
 AL2O3_FORCE_INLINE void Handle_Manager32RegisterVTable(uint8_t type, Handle_Manager32VTable* vtable) {
-	extern Handle_Manager32VTable* Handle_Manager32VTableGlobal[256];
 	ASSERT(!Handle_Manager32VTableGlobal[type]);
 	Handle_Manager32VTableGlobal[type] = vtable;
 }
 
 AL2O3_FORCE_INLINE Handle_Manager32VTable* Handle_Manager32GetVTable(uint8_t type) {
-	extern Handle_Manager32VTable* Handle_Manager32VTableGlobal[256];
 	ASSERT(Handle_Manager32VTableGlobal[type]);
 	return Handle_Manager32VTableGlobal[type];
 }
