@@ -54,7 +54,7 @@ static Handle_Manager32VTable dynamicVTable = {
 		.handleAllocatedCount = (Handle_Manager32HandleAllocatedCountFunc) &Handle_DynamicManager32HandleAllocatedCount
 };
 
-Handle_Manager32VTable* Handle_Manager32VTableGlobal[256] = {
+AL2O3_EXTERN_C Handle_Manager32VTable* Handle_Manager32VTableGlobal[256] = {
 		&fixedVTable,
 		&dynamicVTable
 };
