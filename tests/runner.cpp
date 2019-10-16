@@ -1,3 +1,4 @@
+// License Summary: MIT see LICENSE file
 #define CATCH_CONFIG_RUNNER
 #include "al2o3_catch2/catch2.hpp"
 #include "utils_simple_logmanager/logmanager.h"
