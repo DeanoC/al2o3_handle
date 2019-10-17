@@ -28,16 +28,17 @@ static uint32_t FixedHandleAllocatedCount(void* actualManager) {
 	return manager->totalHandleCount;
 }
 
+static uint32_t DynamicHandleAllocatedCount(void* actualManager) {
+	Handle_DynamicManager32* manager = (Handle_DynamicManager32*)actualManager;
+	return Thread_AtomicLoad32Relaxed(&manager->totalHandlesAllocated);
+}
+
 static Handle_Manager32VTable fixedVTable = {
 	.destroy = NULL, // shortcut below
 	.alloc = (Handle_Manager32AllocFunc) &Handle_FixedManager32Alloc,
 	.release = (Handle_Manager32ReleaseFunc) &Handle_FixedManager32Release,
 	.isValid = &FixedIsValidFunc,
-	.lock = NULL, // shortcut
-	.unlock = NULL, // shortcut
 	.handleToPtr = &FixedHandleToPtrFunc,
-	.copyToMemory = &FixedCopyToMemoryFunc,
-	.copyFromMemory = &FixedCopyFromMemoryFunc,
 	.handleAllocatedCount = &FixedHandleAllocatedCount
 };
 
@@ -46,12 +47,8 @@ static Handle_Manager32VTable dynamicVTable = {
 		.alloc = (Handle_Manager32AllocFunc) &Handle_DynamicManager32Alloc,
 		.release = (Handle_Manager32ReleaseFunc) &Handle_DynamicManager32Release,
 		.isValid = (Handle_Manager32IsValidFunc) &Handle_DynamicManager32IsValid,
-		.lock = (Handle_Manager32LockFunc) &Handle_DynamicManager32Lock,
-		.unlock = (Handle_Manager32UnlockFunc) &Handle_DynamicManager32Unlock,
 		.handleToPtr = (Handle_Manager32HandleToPtrFunc) &Handle_DynamicManager32HandleToPtr,
-		.copyToMemory = (Handle_Manager32CopyToMemoryFunc) &Handle_DynamicManager32CopyToMemory,
-		.copyFromMemory = (Handle_Manager32CopyFromMemoryFunc) &Handle_DynamicManager32CopyFromMemory,
-		.handleAllocatedCount = (Handle_Manager32HandleAllocatedCountFunc) &Handle_DynamicManager32HandleAllocatedCount
+		.handleAllocatedCount = &DynamicHandleAllocatedCount
 };
 
 AL2O3_EXTERN_C Handle_Manager32VTable* Handle_Manager32VTableGlobal[256] = {

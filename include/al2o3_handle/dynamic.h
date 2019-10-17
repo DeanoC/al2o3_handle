@@ -1,18 +1,37 @@
 // License Summary: MIT see LICENSE file
 #pragma once
 
-#include "al2o3_thread/thread.h"
-typedef uint32_t Handle_DynamicHandle32;
-typedef struct Handle_DynamicManager32 Handle_DynamicManager32;
-
+// A 32 bit handle can access 16.7 million objects and 256 generations per handle
 // Handle_InvalidDynamicHandle32 == 0 to help catch clear before alloc bugs
+typedef uint32_t Handle_DynamicHandle32;
+#define Handle_MaxDynamicHandles32 0x00FFFFFF
+// Handle_InvalidFixedHandle32 == 0 to help catch clear before alloc bugs
 #define Handle_InvalidDynamicHandle32 0
 
-// dynamic handle manager with internal mutex used when required
-AL2O3_EXTERN_C Handle_DynamicManager32* Handle_ManagerDynamic32Create(size_t elementSize, size_t startingSize, size_t allocationBlockSize);
+#define Handle_DynamicManagerMaxBlocks 256
 
-// dynamic handle manager with external mutux, passing NULL turns off locking
-AL2O3_EXTERN_C Handle_DynamicManager32* Handle_ManagerDynamic32CreateWithMutex(size_t elementSize, size_t startingSize, size_t allocationBlockSize, Thread_Mutex* mutex);
+typedef struct Handle_DynamicManager32 {
+	uint32_t elementSize;
+	uint32_t handlesPerBlockMask;
+	uint32_t handlesPerBlockShift;
+
+
+	// we sometimes want to decrement and other times we need to swap the lists atomically
+	// this kind of dcas isn't supported on any HW we target
+	// so instead we use the fact that are handles are 32 bit and we have 64 bit atomics
+	// we always update both free and deferred atomically at the same time
+	// if any release or allocs have occured the transaction will detect and reverse
+	Thread_Atomic64_t freeListHeads;
+
+	// each block includes the data and the generations store
+	Thread_AtomicPtr_t blocks[Handle_DynamicManagerMaxBlocks];
+
+	Thread_Atomic32_t totalHandlesAllocated;
+
+} Handle_DynamicManager32;
+
+
+AL2O3_EXTERN_C Handle_DynamicManager32* Handle_DynamicManager32Create(uint32_t elementSize, uint32_t allocationBlockSize);
 
 AL2O3_EXTERN_C void Handle_DynamicManager32Destroy(Handle_DynamicManager32* manager);
 
@@ -23,41 +42,3 @@ AL2O3_EXTERN_C bool Handle_DynamicManager32IsValid(Handle_DynamicManager32* mana
 
 // this returns the data ptr for the handle but is unsafe without manual locks for dynamic managers.
 AL2O3_EXTERN_C void* Handle_DynamicManager32HandleToPtr(Handle_DynamicManager32* manager, Handle_DynamicHandle32 handle);
-
-// when taken dynamic memory allocations (and any potential pointer invalidations) are stalled. Noop for lockless
-AL2O3_EXTERN_C void Handle_DynamicManager32Lock(Handle_DynamicManager32* manager);
-AL2O3_EXTERN_C void Handle_DynamicManager32Unlock(Handle_DynamicManager32* manager);
-
-// returns how many handles are actually allocated regardless of use/free etc.
-AL2O3_EXTERN_C uint32_t Handle_DynamicManager32HandleAllocatedCount(Handle_DynamicManager32* manager);
-
-// control the dynamic manager, handle generation elongation. Uses additional memory by reusing handles less
-AL2O3_EXTERN_C void Handle_DynamicManager32SetDeferredFlushThreshold(Handle_DynamicManager32* manager, uint32_t threshold);
-AL2O3_EXTERN_C void Handle_DynamicManager32SetDelayedFlushThreshold(Handle_DynamicManager32* manager, uint32_t threshold);
-
-// these are safest copying safely the data to/from then handle data rather than direct access. Takes the mutex lock so stalls
-AL2O3_EXTERN_C void Handle_DynamicManager32CopyToMemory(Handle_DynamicManager32* manager, Handle_DynamicHandle32 handle, void* dst);
-AL2O3_EXTERN_C void Handle_DynamicManager32CopyFromMemory(Handle_DynamicManager32* manager, Handle_DynamicHandle32 handle, void const* src);
-
-#if __cplusplus
-
-// helper for taking and releasing the mutex lock where required
-// pretty cheap (call + if) even for lockless managers
-struct Handle_DynamicManager32ScopedLock {
-	explicit Handle_DynamicManager32ScopedLock(Handle_DynamicManager32* man) : manager(man) {
-		Handle_DynamicManager32Lock(manager);
-	}
-
-	~Handle_DynamicManager32ScopedLock() {
-		Handle_DynamicManager32Unlock(manager);
-	}
-
-	/// Prevent copy construction.
-	Handle_DynamicManager32ScopedLock(const Handle_DynamicManager32ScopedLock& rhs) = delete;
-	/// Prevent assignment.
-	Handle_DynamicManager32ScopedLock& operator=(const Handle_DynamicManager32ScopedLock& rhs) = delete;
-
-	Handle_DynamicManager32* manager;
-};
-
-#endif

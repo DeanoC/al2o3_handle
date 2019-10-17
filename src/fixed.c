@@ -80,7 +80,7 @@ RedoD0:;
 			goto RedoD0; // retry now
 		}
 	}
-	// we chain to the next enetry in the free list and disturbing the deferred list
+	// we chain to the next entry in the free list without disturbing the deferred list
 	uint32_t const index = headsFreePart & 0x00FFFFFF; // clean up the marker
 	uint32_t *item = (uint32_t *) (((uint8_t*)(manager+1)) + (index * manager->elementSize));
 	uint64_t const newHeads = headsDeferFreePart | *item;
