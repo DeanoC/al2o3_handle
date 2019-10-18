@@ -39,3 +39,5 @@ cmake-build-release
 out_bin/
 
 out_libs/
+
+.DS_Store
