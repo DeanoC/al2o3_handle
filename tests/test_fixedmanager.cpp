@@ -125,12 +125,7 @@ static void InternalThreadFunc(Handle_FixedManager32* manager, uint64_t totalAll
 	}
 }
 
-#if NDEBUG
 static const uint64_t totalAllocReleaseCycles = 10000000ull;
-#else
-static const uint64_t totalAllocReleaseCycles = 1000000ull;
-#endif
-
 
 static void ThreadFuncFixed(void* userPtr) {
 	InternalThreadFunc((Handle_FixedManager32*) userPtr, totalAllocReleaseCycles);
