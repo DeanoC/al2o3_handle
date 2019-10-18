@@ -32,36 +32,6 @@ AL2O3_FORCE_INLINE uint32_t SlowLog2(uint32_t num) {
 	return count;
 }
 
-AL2O3_FORCE_INLINE bool Handle_DynamicManager32IsValid(Handle_DynamicManager32 *manager,
-																											 Handle_DynamicHandle32 handle) {
-	uint32_t const handleGen = handle >> 24;
-	uint32_t index = (handle & Handle_MaxDynamicHandles32);
-
-	// fetch the base memory block for this index
-	uint8_t *base = (uint8_t *) Thread_AtomicLoadPtrRelaxed(&manager->blocks[index >> manager->handlesPerBlockShift]);
-	ASSERT(base);
-	index = index & manager->handlesPerBlockMask;
-	// point to generation data for this index
-	uint8_t *gen = base + ((manager->handlesPerBlockMask + 1) * manager->elementSize) + index;
-
-	return (handleGen == *gen);
-}
-
-AL2O3_FORCE_INLINE void *Handle_DynamicManager32HandleToPtr(Handle_DynamicManager32 *manager,
-																														Handle_DynamicHandle32 handle) {
-	// fetch the base memory block for this index
-	uint32_t const index = (handle & Handle_MaxDynamicHandles32);
-	uint8_t const * const base = (uint8_t *) Thread_AtomicLoadPtrRelaxed(&manager->blocks[index >> manager->handlesPerBlockShift]);
-	ASSERT(base);
-	// check the generation
-	uint8_t const * const gen = base + ((manager->handlesPerBlockMask + 1) * manager->elementSize) + (index & manager->handlesPerBlockMask);
-	ASSERT((handle >> 24) == *gen);
-	if((handle >> 24) != *gen) {
-		return NULL;
-	}
-	return (void*)(base + ((index & manager->handlesPerBlockMask) * manager->elementSize));
-}
-
 // return true to retry the allocation, false means no hope
 static bool AllocNewBlock(Handle_DynamicManager32 *manager) {
 	if (Thread_AtomicLoad32Relaxed(&manager->totalHandlesAllocated) >= Handle_MaxDynamicHandles32) {
