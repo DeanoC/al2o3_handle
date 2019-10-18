@@ -55,7 +55,7 @@ AL2O3_FORCE_INLINE void *Handle_DynamicManager32HandleToPtr(Handle_DynamicManage
 	ASSERT(base);
 	// check the generation
 	uint8_t const * const gen = base + ((manager->handlesPerBlockMask + 1) * manager->elementSize) + (index & manager->handlesPerBlockMask);
-//	ASSERT((handle >> 24) == *gen);
+	ASSERT((handle >> 24) == *gen);
 	if((handle >> 24) != *gen) {
 		return NULL;
 	}
@@ -68,15 +68,17 @@ static bool AllocNewBlock(Handle_DynamicManager32 *manager) {
 		LOGWARNING("Allocated all 16.7 million handles already!");
 		return false;
 	}
-	if (Thread_AtomicLoad32Relaxed(&manager->totalHandlesAllocated)
-			>= (manager->handlesPerBlockMask + 1) * Handle_DynamicManagerMaxBlocks) {
-		LOGWARNING("Trying to allocate more than %i blocks! Increase block size", Handle_DynamicManagerMaxBlocks);
-		return false;
-	}
-
 	// first thing we need to do is claim our new index range
 	uint32_t baseIndex =
 			Thread_AtomicFetchAdd32Relaxed(&manager->totalHandlesAllocated, (manager->handlesPerBlockMask + 1));
+
+	if (baseIndex >= (manager->handlesPerBlockMask + 1) * Handle_DynamicManagerMaxBlocks) {
+		LOGWARNING("Trying to allocate more than %i blocks! Increase block size", Handle_DynamicManagerMaxBlocks);
+		Thread_AtomicFetchAdd32Relaxed(&manager->totalHandlesAllocated, -(manager->handlesPerBlockMask + 1));
+		return false;
+	}
+
+	ASSERT((baseIndex >> manager->handlesPerBlockShift) < Handle_DynamicManagerMaxBlocks);
 
 	size_t const blockSize = ((manager->handlesPerBlockMask + 1) * manager->elementSize) +
 			((manager->handlesPerBlockMask + 1) * sizeof(uint8_t));
@@ -103,6 +105,7 @@ static bool AllocNewBlock(Handle_DynamicManager32 *manager) {
 	uint64_t const heads = Thread_AtomicLoad64Relaxed(&manager->freeListHeads);
 	uint32_t const headsFreePart = (uint32_t) (heads & 0xFFFFFFFFull);
 	uint64_t const headsDeferFreePart = heads & ~0xFFFFFFFFull;
+	ASSERT(((heads & 0x00FFFFFFull)>>manager->handlesPerBlockShift) < Handle_DynamicManagerMaxBlocks);
 
 	// we chain to the next entry in the free list without disturbing the deferred list
 	uint64_t const newHeads = headsDeferFreePart | baseIndex;
@@ -148,7 +151,7 @@ AL2O3_EXTERN_C Handle_DynamicManager32 *Handle_DynamicManager32Create(uint32_t e
 	Thread_AtomicStorePtrRelaxed(manager->blocks + 0, base);
 	Thread_AtomicStore32Relaxed(&manager->totalHandlesAllocated, handlesPerBlock);
 
-	memset(base, 0xDC, handlesPerBlock * manager->elementSize);
+	memset(base, 0x0, handlesPerBlock * manager->elementSize);
 
 	// init free list for new block
 	// both gen and block index are zero'ed via calloc
@@ -193,6 +196,7 @@ AL2O3_EXTERN_C Handle_DynamicHandle32 Handle_DynamicManager32Alloc(Handle_Dynami
 	uint64_t const heads = Thread_AtomicLoad64Relaxed(&manager->freeListHeads);
 	uint32_t const headsFreePart = (uint32_t) (heads & 0xFFFFFFFFull);
 	uint64_t const headsDeferFreePart = heads & ~0xFFFFFFFFull;
+	ASSERT(((heads & 0x00FFFFFFull)>>manager->handlesPerBlockShift) < Handle_DynamicManagerMaxBlocks);
 
 	// check to see if the free list is empty
 	if (headsFreePart == Handle_InvalidDynamicHandle32) {
@@ -218,11 +222,13 @@ AL2O3_EXTERN_C Handle_DynamicHandle32 Handle_DynamicManager32Alloc(Handle_Dynami
 		}
 	}
 	// we chain to the next entry in the free list without disturbing the deferred list
-	uint32_t index = headsFreePart & 0x00FFFFFF; // clean up the marker
-	uint32_t const actualIndex = index;
+	uint32_t const actualIndex = headsFreePart & 0x00FFFFFF;
 	// fetch the base memory block for this index
-	uint8_t * const base = (uint8_t *) Thread_AtomicLoadPtrRelaxed(&manager->blocks[index >> manager->handlesPerBlockShift]);
-	index = index & manager->handlesPerBlockMask;
+	uint32_t const baseIndex = actualIndex >> manager->handlesPerBlockShift;
+	ASSERT(baseIndex < Handle_DynamicManagerMaxBlocks);
+	uint8_t * const base = (uint8_t *) Thread_AtomicLoadPtrRelaxed(&manager->blocks[baseIndex]);
+	ASSERT(base != NULL);
+	uint32_t index = actualIndex & manager->handlesPerBlockMask;
 	uint32_t * const item = (uint32_t *) (base + (index * manager->elementSize));
 	ASSERT((uint8_t*)item < (base + ((manager->handlesPerBlockMask+1)*manager->elementSize) ));
 
@@ -234,7 +240,7 @@ AL2O3_EXTERN_C Handle_DynamicHandle32 Handle_DynamicManager32Alloc(Handle_Dynami
 
 	// the item is now ours to abuse
 	// clear it out ready for its new life
-	memset(item, 0xDC, manager->elementSize);
+	memset(item, 0x0, manager->elementSize);
 
 	// now make the handle and return it
 	// point to generation data for this index
@@ -246,12 +252,13 @@ AL2O3_EXTERN_C void Handle_DynamicManager32Release(Handle_DynamicManager32 *mana
 	ASSERT((handle & Handle_MaxDynamicHandles32) < Thread_AtomicLoad32Relaxed(&manager->totalHandlesAllocated));
 	ASSERT(Handle_DynamicManager32IsValid(manager, handle));
 
-	uint32_t index = handle & 0x00FFFFFF; // clean out the current generation
-	uint32_t const actualIndex = index;
+	uint32_t const actualIndex = handle & 0x00FFFFFF; // clean out the current generation
+	uint32_t const blockIndex = actualIndex >> manager->handlesPerBlockShift;
+	uint32_t const index = actualIndex & manager->handlesPerBlockMask;
+	ASSERT(blockIndex < Handle_DynamicManagerMaxBlocks);
 
 	// fetch the base memory block for this index
-	uint8_t *base = (uint8_t *) Thread_AtomicLoadPtrRelaxed(&manager->blocks[index >> manager->handlesPerBlockShift]);
-	index = (index & manager->handlesPerBlockMask);
+	uint8_t *base = (uint8_t *) Thread_AtomicLoadPtrRelaxed(&manager->blocks[blockIndex]);
 	// point to generation data for this index
 	uint8_t *gen = base + ((manager->handlesPerBlockMask+1) * manager->elementSize) + index;
 	uint32_t *item = (uint32_t *) (base + (index * manager->elementSize));
@@ -263,7 +270,7 @@ AL2O3_EXTERN_C void Handle_DynamicManager32Release(Handle_DynamicManager32 *mana
 		*gen = 1;
 	}
 
-	uint64_t markerIndex = ((uint64_t) actualIndex | 0xFF000000ull) << 32ull; // marker
+	uint64_t markerIndex = ((uint64_t)handle) << 32ull; // marker
 
 	RedoF:;
 	// add it to the deferred list without changing the free list
@@ -271,6 +278,7 @@ AL2O3_EXTERN_C void Handle_DynamicManager32Release(Handle_DynamicManager32 *mana
 	uint64_t const heads = Thread_AtomicLoad64Relaxed(&manager->freeListHeads);
 	uint64_t const headsFreePart = heads & 0xFFFFFFFFull;
 	uint32_t const headsDeferFreePart = (uint32_t) ((heads & ~0xFFFFFFFFull) >> 32ull);
+	ASSERT(((heads & 0x00FFFFFFull)>>manager->handlesPerBlockShift) < Handle_DynamicManagerMaxBlocks);
 
 	*item = headsDeferFreePart;
 	uint64_t const newHeads = markerIndex | headsFreePart;

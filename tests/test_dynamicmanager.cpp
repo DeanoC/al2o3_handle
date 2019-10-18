@@ -5,8 +5,13 @@
 #include "al2o3_handle/dynamic.h"
 #include "al2o3_cadt/vector.h"
 #include "al2o3_thread/thread.h"
+#include "utils_simple_logmanager/logmanager.h"
 
 #include <inttypes.h>
+
+//we use this to quiet some warnings that we expect during test
+extern SimpleLogManager_Handle logger;
+
 namespace {
 struct Test {
 	uint8_t data[256];
@@ -111,7 +116,7 @@ static void InternalThreadFunc(Handle_DynamicManager32* manager, uint64_t totalA
 
 		Handle_DynamicHandle32 handle = Handle_DynamicManager32Alloc(manager);
 		if(handle == Handle_InvalidDynamicHandle32) {
-			LOGINFO("Invalid Handle");
+			LOGWARNING("Invalid Handle");
 			return;
 		}
 
@@ -140,20 +145,15 @@ static void InternalThreadFunc(Handle_DynamicManager32* manager, uint64_t totalA
 	}
 }
 
-static const uint64_t totalAllocReleaseCycles = 100000000ull;
+static const uint64_t totalAllocReleaseCycles = 5000000ull;
 
 static void ThreadFuncDynamic(void* userPtr) {
 
 	Handle_DynamicManager32* manager = (Handle_DynamicManager32*) userPtr;
 	InternalThreadFunc(manager, totalAllocReleaseCycles);
 }
-
-TEST_CASE(" Multithreaded Dynamic", "[al2o3 handle]") {
-
-	LOGINFO("-----------------------------------------------------------------------");
-	LOGINFO("Starting multithread dynamic handle manager stress test - takes a while");
-	const uint32_t blockSize = 1024;
-	const uint32_t numThreads = Thread_CPUCoreCount() * 5;
+void MultithreadDynamicLoop(const uint32_t blockSize, const bool expectedResult) {
+	const uint32_t numThreads = 20;
 	const uint64_t totalTotalAllocReleaseCycles = totalAllocReleaseCycles * numThreads;
 
 	Handle_DynamicManager32* manager = Handle_DynamicManager32Create(sizeof(uint64_t), blockSize);
@@ -177,8 +177,29 @@ TEST_CASE(" Multithreaded Dynamic", "[al2o3 handle]") {
 	LOGINFO("Delibrately Leaked %" PRId64 " Objects, expected leak count %" PRId64,
 					leakedCount,
 					totalTotalAllocReleaseCycles / 1000);
-	LOGINFO("Total handles allocated (including leaks) %u", Thread_AtomicLoad32Relaxed(&manager->totalHandlesAllocated));
+	REQUIRE(((leakedCount - totalTotalAllocReleaseCycles / 1000) == 0) == expectedResult);
 	Handle_DynamicManager32Destroy(manager);
+
+}
+TEST_CASE(" Multithreaded Dynamic", "[al2o3 handle]") {
+	LOGINFO("-----------------------------------------------------------------------");
+	LOGINFO("Starting multithread dynamic handle manager stress test - takes a while");
+	uint32_t blockSize = 2;
+
+	while(blockSize < 65536) {
+		LOGINFO("-----------------------------");
+		LOGINFO("BlockSize: %u", blockSize);
+		int64_t const maxHandles = (blockSize * 256);
+		int64_t const leaksExpected = ((totalAllocReleaseCycles / 1000)*20);
+		bool const expected =  leaksExpected <= maxHandles;
+		SimpleLogManager_SetWarningQuiet(logger, true);
+		MultithreadDynamicLoop(blockSize, expected);
+		if(expected == false) {
+			LOGINFO("Blocksize was too small, handled handle exhaustion correctly");
+		}
+		SimpleLogManager_SetWarningQuiet(logger, false);
+		blockSize *= 2;
+	}
 }
 
 TEST_CASE("Generation overflow stats Dynamic", "[al2o3 handle]") {
