@@ -8,13 +8,13 @@ typedef uint32_t Handle_DynamicHandle32;
 // Handle_InvalidFixedHandle32 == 0 to help catch clear before alloc bugs
 #define Handle_InvalidDynamicHandle32 0
 
-#define Handle_DynamicManagerMaxBlocks 256
-
 typedef struct Handle_DynamicManager32 {
 	uint32_t elementSize;
+	uint32_t maxBlocks;
 	uint32_t handlesPerBlockMask;
 	uint32_t handlesPerBlockShift;
 
+	uint32_t neverReissueOldHandles : 1;
 
 	// we sometimes want to decrement and other times we need to swap the lists atomically
 	// this kind of dcas isn't supported on any HW we target
@@ -24,19 +24,21 @@ typedef struct Handle_DynamicManager32 {
 	Thread_Atomic64_t freeListHeads;
 
 	// each block includes the data and the generations store
-	Thread_AtomicPtr_t blocks[Handle_DynamicManagerMaxBlocks];
+	Thread_AtomicPtr_t *blocks;
 
 	Thread_Atomic32_t totalHandlesAllocated;
 
 } Handle_DynamicManager32;
 
+AL2O3_EXTERN_C Handle_DynamicManager32 *Handle_DynamicManager32Create(uint32_t elementSize,
+																																			uint32_t allocationBlockSize,
+																																			uint32_t maxBlocks,
+																																			bool neverReissueOldHandles);
 
-AL2O3_EXTERN_C Handle_DynamicManager32* Handle_DynamicManager32Create(uint32_t elementSize, uint32_t allocationBlockSize);
+AL2O3_EXTERN_C void Handle_DynamicManager32Destroy(Handle_DynamicManager32 *manager);
 
-AL2O3_EXTERN_C void Handle_DynamicManager32Destroy(Handle_DynamicManager32* manager);
-
-AL2O3_EXTERN_C Handle_DynamicHandle32 Handle_DynamicManager32Alloc(Handle_DynamicManager32* manager);
-AL2O3_EXTERN_C void Handle_DynamicManager32Release(Handle_DynamicManager32* manager, Handle_DynamicHandle32 handle);
+AL2O3_EXTERN_C Handle_DynamicHandle32 Handle_DynamicManager32Alloc(Handle_DynamicManager32 *manager);
+AL2O3_EXTERN_C void Handle_DynamicManager32Release(Handle_DynamicManager32 *manager, Handle_DynamicHandle32 handle);
 
 AL2O3_FORCE_INLINE bool Handle_DynamicManager32IsValid(Handle_DynamicManager32 *manager,
 																											 Handle_DynamicHandle32 handle) {
@@ -57,13 +59,15 @@ AL2O3_FORCE_INLINE void *Handle_DynamicManager32HandleToPtr(Handle_DynamicManage
 																														Handle_DynamicHandle32 handle) {
 	// fetch the base memory block for this index
 	uint32_t const index = (handle & Handle_MaxDynamicHandles32);
-	uint8_t const * const base = (uint8_t *) Thread_AtomicLoadPtrRelaxed(&manager->blocks[index >> manager->handlesPerBlockShift]);
+	uint8_t const
+			*const base = (uint8_t *) Thread_AtomicLoadPtrRelaxed(&manager->blocks[index >> manager->handlesPerBlockShift]);
 	ASSERT(base);
 	// check the generation
-	uint8_t const * const gen = base + ((manager->handlesPerBlockMask + 1) * manager->elementSize) + (index & manager->handlesPerBlockMask);
+	uint8_t const *const gen =
+			base + ((manager->handlesPerBlockMask + 1) * manager->elementSize) + (index & manager->handlesPerBlockMask);
 	ASSERT((handle >> 24) == *gen);
-	if((handle >> 24) != *gen) {
+	if ((handle >> 24) != *gen) {
 		return NULL;
 	}
-	return (void*)(base + ((index & manager->handlesPerBlockMask) * manager->elementSize));
+	return (void *) (base + ((index & manager->handlesPerBlockMask) * manager->elementSize));
 }

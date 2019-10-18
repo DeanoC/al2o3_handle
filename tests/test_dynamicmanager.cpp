@@ -24,7 +24,7 @@ void FillTest(Test *test) {
 }
 } // end anon namespace
 TEST_CASE("Basic tests Dynamic", "[al2o3 handle]") {
-	Handle_DynamicManager32* manager = Handle_DynamicManager32Create(sizeof(Test), 16);
+	Handle_DynamicManager32* manager = Handle_DynamicManager32Create(sizeof(Test), 16, 1, false);
 	REQUIRE(manager);
 
 	Handle_DynamicHandle32 handle0 = Handle_DynamicManager32Alloc(manager);
@@ -40,7 +40,10 @@ TEST_CASE("Basic tests Dynamic", "[al2o3 handle]") {
 
 TEST_CASE("Block allocation tests Dynamic", "[al2o3 handle]") {
 	static const int AllocationBlockSize = 16;
-	Handle_DynamicManager32* manager = Handle_DynamicManager32Create(sizeof(Test), AllocationBlockSize);
+	Handle_DynamicManager32* manager = Handle_DynamicManager32Create(sizeof(Test),
+			AllocationBlockSize,
+			4,
+			false);
 	REQUIRE(manager);
 
 	for(int i =0 ; i < AllocationBlockSize * 4;++i) {
@@ -58,7 +61,7 @@ TEST_CASE("Block allocation tests Dynamic", "[al2o3 handle]") {
 TEST_CASE("generation tests Dynamic", "[al2o3 handle]") {
 	static const int AllocationBlockSize = 16;
 	Handle_DynamicManager32* manager =
-			Handle_DynamicManager32Create(sizeof(Test), AllocationBlockSize);
+			Handle_DynamicManager32Create(sizeof(Test), AllocationBlockSize, 4, false);
 	REQUIRE(manager);
 
 	for (int i = 0; i < AllocationBlockSize * 4; ++i) {
@@ -79,7 +82,7 @@ TEST_CASE("generation tests Dynamic", "[al2o3 handle]") {
 TEST_CASE("data access tests Dynamic", "[al2o3 handle]") {
 	static const int AllocationBlockSize = 16;
 	Handle_DynamicManager32* manager =
-			Handle_DynamicManager32Create(sizeof(Test), AllocationBlockSize);
+			Handle_DynamicManager32Create(sizeof(Test), AllocationBlockSize, 4, false);
 	REQUIRE(manager);
 
 	Test zeroData;
@@ -156,7 +159,10 @@ void MultithreadDynamicLoop(const uint32_t blockSize, const bool expectedResult)
 	const uint32_t numThreads = 20;
 	const uint64_t totalTotalAllocReleaseCycles = totalAllocReleaseCycles * numThreads;
 
-	Handle_DynamicManager32* manager = Handle_DynamicManager32Create(sizeof(uint64_t), blockSize);
+	Handle_DynamicManager32* manager = Handle_DynamicManager32Create(sizeof(uint64_t),
+			blockSize,
+			256,
+			false);
 	REQUIRE(manager);
 
 	Thread_AtomicStore64Relaxed(&leaked, 0);
@@ -172,7 +178,7 @@ void MultithreadDynamicLoop(const uint32_t blockSize, const bool expectedResult)
 		Thread_ThreadDestroy(threads + i);
 	}
 	uint64_t leakedCount = Thread_AtomicLoad64Relaxed(&leaked);
-	LOGINFO("After %" PRId64 " million alloc/release cycles", totalTotalAllocReleaseCycles / 1000000ull);
+	LOGINFO("After trying %" PRId64 " million alloc/release cycles", totalTotalAllocReleaseCycles / 1000000ull);
 
 	LOGINFO("Delibrately Leaked %" PRId64 " Objects, expected leak count %" PRId64,
 					leakedCount,
@@ -206,13 +212,13 @@ TEST_CASE("Generation overflow stats Dynamic", "[al2o3 handle]") {
 	LOGINFO("-----------------------------------------------------------------------");
 	LOGINFO("Starting generation overflow dynamic handle manager test - takes a while");
 
-	static const uint32_t blockSize = 1024;
-#if NDEBUG
-	static const uint64_t totalAllocReleaseCycles = 1000000000ull;
-#else
+	static const uint32_t blockSize = 1024 * 16;
 	static const uint64_t totalAllocReleaseCycles = 100000000ull;
-#endif
-	Handle_DynamicManager32* manager = Handle_DynamicManager32Create(sizeof(Test), blockSize);
+
+	Handle_DynamicManager32* manager = Handle_DynamicManager32Create(sizeof(Test),
+			blockSize,
+			256,
+			false);
 	REQUIRE(manager);
 
 	uint64_t allocReleaseCycles = 0;
@@ -226,7 +232,6 @@ TEST_CASE("Generation overflow stats Dynamic", "[al2o3 handle]") {
 
 	while(allocReleaseCycles != totalAllocReleaseCycles ) {
 		Handle_DynamicHandle32 handle = Handle_DynamicManager32Alloc(manager);
-		// we use 1st gen due to the special case of handle 0
 		if((handle >> 24u) == 1) {
 			uint32_t const index = (handle & 0x00FFFFFFu);
 			if(index < CADT_VectorSize(allocTracker)) {
@@ -257,3 +262,40 @@ TEST_CASE("Generation overflow stats Dynamic", "[al2o3 handle]") {
 }
 
 
+TEST_CASE("Generation overflow stats Dynamic never reissue old handles", "[al2o3 handle]") {
+	LOGINFO("-----------------------------------------------------------------------");
+	LOGINFO("Starting generation overflow dynamic handle manager with never reissue test - takes a while");
+
+	static const uint32_t blockSize = 1024 * 16;
+	static const uint64_t totalAllocReleaseCycles = 100000000ull;
+	Handle_DynamicManager32* manager = Handle_DynamicManager32Create(sizeof(Test),
+			blockSize,
+			256,
+			true);
+	REQUIRE(manager);
+
+	uint64_t allocReleaseCycles = 0;
+	uint64_t gen0Max = 0;
+
+	Handle_DynamicManager32Alloc(manager); // remove 0 index from this test
+
+	while(allocReleaseCycles != totalAllocReleaseCycles ) {
+		Handle_DynamicHandle32 handle = Handle_DynamicManager32Alloc(manager);
+		REQUIRE(handle != Handle_InvalidDynamicHandle32);
+		if((handle >> 24u) == 0) {
+			// gen 0 should only ever increase in index (no reuse)
+			uint32_t const index = (handle & 0x00FFFFFFu);
+			REQUIRE(index > gen0Max);
+			gen0Max = index;
+		}
+		Handle_DynamicManager32Release(manager, handle);
+		allocReleaseCycles++;
+	}
+
+	LOGINFO("After %" PRId64 " million alloc/release cycles", totalAllocReleaseCycles / 1000000ull);
+	uint32_t allocated = Thread_AtomicLoad32Relaxed(&manager->totalHandlesAllocated);
+	LOGINFO("Objects allocated: %u", allocated);
+	LOGINFO("Memory overhead (with 8 byte objects): %u B", (allocated - blockSize) * sizeof(uint64_t));
+
+	Handle_DynamicManager32Destroy(manager);
+}
