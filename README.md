@@ -3,35 +3,25 @@
 
 
 # Handle Manager
+
 A generational safe handle/pool system for access to objects safer than a raw pointer
 
 Benfits:
-32 bit handle can access 16.7 millions same sized objects.
-Each object can be upto 4GB in size (in theory).
 
-Handle uniquely represent a particular object and when it was allocated.
-Using a handle to a particular object that has been released will (in most cases)
-report and error.
+32 bit handle can access 16.7 millions same sized objects. Each object can be upto 4GB in size (in theory). Objects are allocated in blocks (number of objects in a blocks are a creation parameter). Time to allocate and release an object is low and linear.
 
-Fixed or dynamic sizing pool. 
+Fixed or dynamic sizing pool. Both implementation are non-locking and thread safe.
 
-Implementation are thread safe.
-Fixed is non locking, and a owned objects can be freely
-accessed until released.
-Dynamic has locking interface to ensure and access is safer.
+A Handle uniquely represent a particular object and when it was allocated. Using a handle to a particular object that has been released will report and error (in most cases).
 
-'Virtual' implementation allows either the fixed or dynamic
-variant to be used with the same code (except for construction)
+Handles have generational safety helping to detect corruption. Access after free, invalidation etc. will all be detected fairly well. Can optionally choose on dynamic to never reuse a handle.
 
-Handles have generational safety helping to detect corruption.
-Access after free, invalidation etc.
+Handle manager actively extends the time between generational overlap as best it can. When handle reuse is allowed, will take the longest number of alloc/release cycles it can (256 * handlers per block size).
 
-Handle mnaager actively extends the time between generational
-overlap as best it can. When generational overlap occurs, no false reporting
-only effect is that a invalid access might not be reported.
+When generational overlap occurs, no false reporting only effect is that an invalid access might not be reported. 
 
-Low over memory head, beyond the manager header only 1 byte per object is used 
-outside the objects themselves.
+Low memory over head, beyond the manager header only 1 byte + object size is used.
 
-TODO: Dynamic implmentation needs redoing to stop pointer invalidation and
-requiring locks during access to owned handle.
+Fixed sized allocator only has 16 byte header. Dynamic is bigger and depends on the maximum number of block allowed.
+
+Pointer are never invalidated! Between an alloc and release, the memory and pointer to it are yours and will not change under you regardless and any other thread activity (unless another thread destroy the manager itself).
