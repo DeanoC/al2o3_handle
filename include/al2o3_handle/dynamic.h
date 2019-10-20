@@ -1,6 +1,8 @@
 // License Summary: MIT see LICENSE file
 #pragma once
 
+#include "al2o3_thread/atomic.h"
+
 // A 32 bit handle can access 16.7 million objects and 256 generations per handle
 // Handle_InvalidDynamicHandle32 == 0 to help catch clear before alloc bugs
 typedef uint32_t Handle_DynamicHandle32;
@@ -42,6 +44,9 @@ AL2O3_EXTERN_C void Handle_DynamicManager32Release(Handle_DynamicManager32 *mana
 
 AL2O3_FORCE_INLINE bool Handle_DynamicManager32IsValid(Handle_DynamicManager32 *manager,
 																											 Handle_DynamicHandle32 handle) {
+	if(handle == Handle_InvalidDynamicHandle32) {
+		return false;
+	}
 	uint32_t const handleGen = handle >> 24;
 	uint32_t index = (handle & Handle_MaxDynamicHandles32);
 
@@ -57,6 +62,9 @@ AL2O3_FORCE_INLINE bool Handle_DynamicManager32IsValid(Handle_DynamicManager32 *
 
 AL2O3_FORCE_INLINE void *Handle_DynamicManager32HandleToPtr(Handle_DynamicManager32 *manager,
 																														Handle_DynamicHandle32 handle) {
+	if(handle == Handle_InvalidDynamicHandle32) {
+		return NULL;
+	}
 	// fetch the base memory block for this index
 	uint32_t const index = (handle & Handle_MaxDynamicHandles32);
 	uint8_t const
