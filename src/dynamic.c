@@ -44,7 +44,7 @@ static bool AllocNewBlock(Handle_DynamicManager32 *manager) {
 
 	if (baseIndex >= (manager->handlesPerBlockMask + 1) * manager->maxBlocks) {
 		LOGWARNING("Trying to allocate more than %i blocks! Increase block size or max blocks", manager->maxBlocks);
-		Thread_AtomicFetchAdd32Relaxed(&manager->totalHandlesAllocated, -(manager->handlesPerBlockMask + 1));
+		Thread_AtomicFetchAdd32Relaxed(&manager->totalHandlesAllocated, -(int32_t)(manager->handlesPerBlockMask + 1));
 		return false;
 	}
 
