@@ -2,7 +2,7 @@
 #include "al2o3_platform/platform.h"
 #include "al2o3_memory/memory.h"
 #include "al2o3_thread/atomic.h"
-#include "al2o3_handle/dynamic.h"
+#include "al2o3_handle/handle.h"
 
 AL2O3_FORCE_INLINE bool IsPow2(uint32_t num) {
 	return ((num & (num - 1)) == 0);
@@ -33,8 +33,8 @@ AL2O3_FORCE_INLINE uint32_t SlowLog2(uint32_t num) {
 }
 
 // return true to retry the allocation, false means no hope
-static bool AllocNewBlock(Handle_DynamicManager32 *manager) {
-	if (Thread_AtomicLoad32Relaxed(&manager->totalHandlesAllocated) >= Handle_MaxDynamicHandles32) {
+static bool AllocNewBlock32(Handle_Manager32 *manager) {
+	if (Thread_AtomicLoad32Relaxed(&manager->totalHandlesAllocated) >= Handle_MaxHandles32) {
 		LOGWARNING("Allocated all 16.7 million handles already!");
 		return false;
 	}
@@ -89,12 +89,12 @@ static bool AllocNewBlock(Handle_DynamicManager32 *manager) {
 	return true;
 }
 
-AL2O3_EXTERN_C Handle_DynamicManager32 *Handle_DynamicManager32Create(uint32_t elementSize,
+AL2O3_EXTERN_C Handle_Manager32 *Handle_Manager32Create(uint32_t elementSize,
 																																			uint32_t handlesPerBlock,
 																																			uint32_t maxBlocks,
 																																			bool neverReissueOldHandles) {
 	ASSERT(elementSize >= sizeof(uint32_t));
-	ASSERT(handlesPerBlock <= Handle_MaxDynamicHandles32);
+	ASSERT(handlesPerBlock <= Handle_MaxHandles32);
 
 	if (!IsPow2(handlesPerBlock)) {
 		LOGWARNING("handlesPerBlock (%u) should be a power of 2, using %u", handlesPerBlock, NextPow2(handlesPerBlock));
@@ -106,12 +106,12 @@ AL2O3_EXTERN_C Handle_DynamicManager32 *Handle_DynamicManager32Create(uint32_t e
 			(handlesPerBlock * sizeof(uint8_t));
 
 	// first block is attached directly to the header
-	size_t const allocSize = sizeof(Handle_DynamicManager32)
+	size_t const allocSize = sizeof(Handle_Manager32)
 			+ blockSize +
 			8 + // padding to ensure atomics are at least 8 byte aligned
 			(maxBlocks * sizeof(Thread_AtomicPtr_t));
 
-	Handle_DynamicManager32 *manager = (Handle_DynamicManager32 *) MEMORY_CALLOC(1, allocSize);
+	Handle_Manager32 *manager = (Handle_Manager32 *) MEMORY_CALLOC(1, allocSize);
 	if (!manager) {
 		return NULL;
 	}
@@ -151,7 +151,7 @@ AL2O3_EXTERN_C Handle_DynamicManager32 *Handle_DynamicManager32Create(uint32_t e
 	return manager;
 }
 
-AL2O3_EXTERN_C void Handle_DynamicManager32Destroy(Handle_DynamicManager32 *manager) {
+AL2O3_EXTERN_C void Handle_Manager32Destroy(Handle_Manager32 *manager) {
 	if (!manager) {
 		return;
 	}
@@ -167,7 +167,7 @@ AL2O3_EXTERN_C void Handle_DynamicManager32Destroy(Handle_DynamicManager32 *mana
 	MEMORY_FREE(manager);
 }
 
-AL2O3_EXTERN_C Handle_DynamicHandle32 Handle_DynamicManager32Alloc(Handle_DynamicManager32 *manager) {
+AL2O3_EXTERN_C Handle_Handle32 Handle_Manager32Alloc(Handle_Manager32 *manager) {
 	uint32_t noFreeCount = 0;
 	RedoD0:;
 	// heads has 2 linked list packed in a 64 bit location. Its our transaction
@@ -184,10 +184,10 @@ AL2O3_EXTERN_C Handle_DynamicHandle32 Handle_DynamicManager32Alloc(Handle_Dynami
 			// the deferred list is empty, so we have no free handles
 			// we now do the tricky part of allocating a new block in a lock free
 			// way *gulp*
-			bool retry = AllocNewBlock(manager);
+			bool retry = AllocNewBlock32(manager);
 			if (retry == false || noFreeCount >= 1000) {
 				LOGWARNING("Manager has run out of handles");
-				Handle_DynamicHandle32 invalid = {0}; // fail
+				Handle_Handle32 invalid = {0}; // fail
 				return invalid;
 			}
 			// try again but mark we've tried, allow a few attempts then give up
@@ -225,17 +225,17 @@ AL2O3_EXTERN_C Handle_DynamicHandle32 Handle_DynamicManager32Alloc(Handle_Dynami
 	// now make the handle and return it
 	// point to generation data for this index
 	uint8_t *gen = base + ((manager->handlesPerBlockMask + 1) * manager->elementSize) + index;
-	Handle_DynamicHandle32 handle = {
+	Handle_Handle32 handle = {
 		.handle = ((uint32_t) *gen) << 24u | actualIndex
 	};
 	return handle;
 }
 
-AL2O3_EXTERN_C void Handle_DynamicManager32Release(Handle_DynamicManager32 *manager, Handle_DynamicHandle32 handle) {
-	ASSERT((handle.handle & Handle_MaxDynamicHandles32) < Thread_AtomicLoad32Relaxed(&manager->totalHandlesAllocated));
-	ASSERT(Handle_DynamicManager32IsValid(manager, handle));
+AL2O3_EXTERN_C void Handle_Manager32Release(Handle_Manager32 *manager, Handle_Handle32 handle) {
+	ASSERT((handle.handle & Handle_MaxHandles32) < Thread_AtomicLoad32Relaxed(&manager->totalHandlesAllocated));
+	ASSERT(Handle_Manager32IsValid(manager, handle));
 
-	uint32_t const actualIndex = handle.handle & Handle_MaxDynamicHandles32; // clean out the current generation
+	uint32_t const actualIndex = handle.handle & Handle_MaxHandles32; // clean out the current generation
 	uint32_t const blockIndex = actualIndex >> manager->handlesPerBlockShift;
 	uint32_t const index = actualIndex & manager->handlesPerBlockMask;
 	ASSERT(blockIndex < manager->maxBlocks);

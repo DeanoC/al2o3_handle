@@ -33,5 +33,6 @@ set( TestDeps
 		al2o3_catch2
 		al2o3_cadt
 		utils_simple_logmanager)
+
 ADD_LIB2_TESTS(${LibName} "${Tests}" "${TestDeps}")
 
