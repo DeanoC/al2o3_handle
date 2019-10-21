@@ -28,10 +28,10 @@ TEST_CASE("Basic tests Dynamic", "[al2o3 handle]") {
 	REQUIRE(manager);
 
 	Handle_DynamicHandle32 handle0 = Handle_DynamicManager32Alloc(manager);
-	REQUIRE(handle0 == 0x01000000);
+	REQUIRE(handle0.handle == 0x01000000);
 	Handle_DynamicManager32Release(manager, handle0);
 	Handle_DynamicHandle32 handle1 = Handle_DynamicManager32Alloc(manager);
-	REQUIRE(handle1 == 1);
+	REQUIRE(handle1.handle == 1);
 	Handle_DynamicManager32Release(manager, handle1);
 
 	Handle_DynamicManager32Destroy(manager);
@@ -49,9 +49,9 @@ TEST_CASE("Block allocation tests Dynamic", "[al2o3 handle]") {
 	for(int i =0 ; i < AllocationBlockSize * 4;++i) {
 		Handle_DynamicHandle32 handle = Handle_DynamicManager32Alloc(manager);
 		if( i == 0) {
-			REQUIRE(handle == 0x01000000);
+			REQUIRE(handle.handle == 0x01000000);
 		} else {
-			REQUIRE(handle == i);
+			REQUIRE(handle.handle == i);
 		}
 	}
 
@@ -118,7 +118,7 @@ static void InternalThreadFunc(Handle_DynamicManager32* manager, uint64_t totalA
 	while(allocReleaseCycles != totalAllocReleaseCycles ) {
 
 		Handle_DynamicHandle32 handle = Handle_DynamicManager32Alloc(manager);
-		if(handle == Handle_InvalidDynamicHandle32) {
+		if(!Handle_DynamicManager32IsValid(manager, handle)) {
 			LOGWARNING("Invalid Handle");
 			return;
 		}
@@ -232,8 +232,8 @@ TEST_CASE("Generation overflow stats Dynamic", "[al2o3 handle]") {
 
 	while(allocReleaseCycles != totalAllocReleaseCycles ) {
 		Handle_DynamicHandle32 handle = Handle_DynamicManager32Alloc(manager);
-		if((handle >> 24u) == 1) {
-			uint32_t const index = (handle & 0x00FFFFFFu);
+		if((handle.handle >> 24u) == 1) {
+			uint32_t const index = (handle.handle & 0x00FFFFFFu);
 			if(index < CADT_VectorSize(allocTracker)) {
 				distance += allocReleaseCycles - *((uint64_t*)CADT_VectorAt(allocTracker, index));
 				numDistances++;
@@ -281,10 +281,10 @@ TEST_CASE("Generation overflow stats Dynamic never reissue old handles", "[al2o3
 
 	while(allocReleaseCycles != totalAllocReleaseCycles ) {
 		Handle_DynamicHandle32 handle = Handle_DynamicManager32Alloc(manager);
-		REQUIRE(handle != Handle_InvalidDynamicHandle32);
-		if((handle >> 24u) == 0) {
+		REQUIRE(Handle_DynamicManager32IsValid(manager, handle));
+		if((handle.handle >> 24u) == 0) {
 			// gen 0 should only ever increase in index (no reuse)
-			uint32_t const index = (handle & 0x00FFFFFFu);
+			uint32_t const index = (handle.handle & 0x00FFFFFFu);
 			REQUIRE(index > gen0Max);
 			gen0Max = index;
 		}

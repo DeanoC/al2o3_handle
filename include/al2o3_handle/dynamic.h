@@ -5,10 +5,8 @@
 
 // A 32 bit handle can access 16.7 million objects and 256 generations per handle
 // Handle_InvalidDynamicHandle32 == 0 to help catch clear before alloc bugs
-typedef uint32_t Handle_DynamicHandle32;
+typedef struct { uint32_t handle; } Handle_DynamicHandle32;
 #define Handle_MaxDynamicHandles32 0x00FFFFFF
-// Handle_InvalidFixedHandle32 == 0 to help catch clear before alloc bugs
-#define Handle_InvalidDynamicHandle32 0
 
 typedef struct Handle_DynamicManager32 {
 	uint32_t elementSize;
@@ -44,11 +42,11 @@ AL2O3_EXTERN_C void Handle_DynamicManager32Release(Handle_DynamicManager32 *mana
 
 AL2O3_FORCE_INLINE bool Handle_DynamicManager32IsValid(Handle_DynamicManager32 *manager,
 																											 Handle_DynamicHandle32 handle) {
-	if(handle == Handle_InvalidDynamicHandle32) {
+	if(handle.handle == 0) {
 		return false;
 	}
-	uint32_t const handleGen = handle >> 24;
-	uint32_t index = (handle & Handle_MaxDynamicHandles32);
+	uint32_t const handleGen = handle.handle >> 24;
+	uint32_t index = (handle.handle & Handle_MaxDynamicHandles32);
 
 	// fetch the base memory block for this index
 	uint8_t *base = (uint8_t *) Thread_AtomicLoadPtrRelaxed(&manager->blocks[index >> manager->handlesPerBlockShift]);
@@ -62,19 +60,19 @@ AL2O3_FORCE_INLINE bool Handle_DynamicManager32IsValid(Handle_DynamicManager32 *
 
 AL2O3_FORCE_INLINE void *Handle_DynamicManager32HandleToPtr(Handle_DynamicManager32 *manager,
 																														Handle_DynamicHandle32 handle) {
-	if(handle == Handle_InvalidDynamicHandle32) {
+	if(handle.handle == 0) {
 		return NULL;
 	}
 	// fetch the base memory block for this index
-	uint32_t const index = (handle & Handle_MaxDynamicHandles32);
+	uint32_t const index = (handle.handle & Handle_MaxDynamicHandles32);
 	uint8_t const
 			*const base = (uint8_t *) Thread_AtomicLoadPtrRelaxed(&manager->blocks[index >> manager->handlesPerBlockShift]);
 	ASSERT(base);
 	// check the generation
 	uint8_t const *const gen =
 			base + ((manager->handlesPerBlockMask + 1) * manager->elementSize) + (index & manager->handlesPerBlockMask);
-	ASSERT((handle >> 24) == *gen);
-	if ((handle >> 24) != *gen) {
+	ASSERT((handle.handle >> 24) == *gen);
+	if ((handle.handle >> 24) != *gen) {
 		return NULL;
 	}
 	return (void *) (base + ((index & manager->handlesPerBlockMask) * manager->elementSize));

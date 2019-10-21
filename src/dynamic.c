@@ -178,16 +178,17 @@ AL2O3_EXTERN_C Handle_DynamicHandle32 Handle_DynamicManager32Alloc(Handle_Dynami
 	ASSERT(((heads & 0x00FFFFFFull) >> manager->handlesPerBlockShift) < manager->maxBlocks);
 
 	// check to see if the free list is empty
-	if (headsFreePart == Handle_InvalidDynamicHandle32) {
+	if (headsFreePart == 0) {
 		// we need to swap the deferred into the free list as free list is empty
-		if (headsDeferFreePart == (uint64_t) Handle_InvalidDynamicHandle32) {
+		if (headsDeferFreePart == (uint64_t) 0) {
 			// the deferred list is empty, so we have no free handles
 			// we now do the tricky part of allocating a new block in a lock free
 			// way *gulp*
 			bool retry = AllocNewBlock(manager);
 			if (retry == false || noFreeCount >= 1000) {
 				LOGWARNING("Manager has run out of handles");
-				return Handle_InvalidDynamicHandle32; // fail
+				Handle_DynamicHandle32 invalid = {0}; // fail
+				return invalid;
 			}
 			// try again but mark we've tried, allow a few attempts then give up
 			noFreeCount++;
@@ -224,14 +225,17 @@ AL2O3_EXTERN_C Handle_DynamicHandle32 Handle_DynamicManager32Alloc(Handle_Dynami
 	// now make the handle and return it
 	// point to generation data for this index
 	uint8_t *gen = base + ((manager->handlesPerBlockMask + 1) * manager->elementSize) + index;
-	return actualIndex | ((uint32_t) *gen) << 24u;
+	Handle_DynamicHandle32 handle = {
+		.handle = ((uint32_t) *gen) << 24u | actualIndex
+	};
+	return handle;
 }
 
 AL2O3_EXTERN_C void Handle_DynamicManager32Release(Handle_DynamicManager32 *manager, Handle_DynamicHandle32 handle) {
-	ASSERT((handle & Handle_MaxDynamicHandles32) < Thread_AtomicLoad32Relaxed(&manager->totalHandlesAllocated));
+	ASSERT((handle.handle & Handle_MaxDynamicHandles32) < Thread_AtomicLoad32Relaxed(&manager->totalHandlesAllocated));
 	ASSERT(Handle_DynamicManager32IsValid(manager, handle));
 
-	uint32_t const actualIndex = handle & 0x00FFFFFF; // clean out the current generation
+	uint32_t const actualIndex = handle.handle & Handle_MaxDynamicHandles32; // clean out the current generation
 	uint32_t const blockIndex = actualIndex >> manager->handlesPerBlockShift;
 	uint32_t const index = actualIndex & manager->handlesPerBlockMask;
 	ASSERT(blockIndex < manager->maxBlocks);
@@ -259,7 +263,7 @@ AL2O3_EXTERN_C void Handle_DynamicManager32Release(Handle_DynamicManager32 *mana
 		*gen = 1;
 	}
 
-	uint64_t markerIndex = ((uint64_t) handle) << 32ull; // marker
+	uint64_t indexInUpper = ((uint64_t) handle.handle) << 32ull;
 
 	RedoF:;
 	// add it to the deferred list without changing the free list
@@ -270,7 +274,7 @@ AL2O3_EXTERN_C void Handle_DynamicManager32Release(Handle_DynamicManager32 *mana
 	ASSERT(((heads & 0x00FFFFFFull) >> manager->handlesPerBlockShift) < manager->maxBlocks);
 
 	*item = headsDeferFreePart;
-	uint64_t const newHeads = markerIndex | headsFreePart;
+	uint64_t const newHeads = indexInUpper | headsFreePart;
 	if (Thread_AtomicCompareExchange64Relaxed(&manager->freeListHeads, heads, newHeads) != heads) {
 		goto RedoF; // transaction fail redo inserting this index into deferred free list
 	}
