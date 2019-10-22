@@ -109,6 +109,66 @@ TEST_CASE("data access tests 32", "[al2o3 handle]") {
 	Handle_Manager32Destroy(manager);
 }
 
+TEST_CASE("Basic tests 64", "[al2o3 handle]") {
+	Handle_Manager64* manager = Handle_Manager64Create(sizeof(Test), 16, 1, false);
+	REQUIRE(manager);
+
+	Handle_Handle64 handle0 = Handle_Manager64Alloc(manager);
+	REQUIRE(handle0.handle == 0x10000000000ull);
+	Handle_Manager64Release(manager, handle0);
+	Handle_Handle64 handle1 = Handle_Manager64Alloc(manager);
+	REQUIRE(handle1.handle == 1);
+	Handle_Manager64Release(manager, handle1);
+
+	Handle_Manager64Destroy(manager);
+}
+
+
+TEST_CASE("Block allocation tests 64", "[al2o3 handle]") {
+	static const int AllocationBlockSize = 16;
+	Handle_Manager64* manager = Handle_Manager64Create(sizeof(Test),
+																										 AllocationBlockSize,
+																										 4,
+																										 false);
+	REQUIRE(manager);
+
+	for(int i =0 ; i < AllocationBlockSize * 4;++i) {
+		Handle_Handle64 handle = Handle_Manager64Alloc(manager);
+		if( i == 0) {
+			REQUIRE(handle.handle == 0x10000000000ull);
+		} else {
+			REQUIRE(handle.handle == i);
+		}
+	}
+
+	Handle_Manager64Destroy(manager);
+}
+
+TEST_CASE("generation tests 64", "[al2o3 handle]") {
+	static const int AllocationBlockSize = 16;
+	Handle_Manager64* manager =
+			Handle_Manager64Create(sizeof(Test), AllocationBlockSize, 4, false);
+	REQUIRE(manager);
+
+	for (int i = 0; i < AllocationBlockSize * 4; ++i) {
+		Handle_Handle64 handle = Handle_Manager64Alloc(manager);
+		Handle_Manager64Release(manager, handle);
+		REQUIRE(Handle_Manager64IsValid(manager, handle) == false);
+	}
+
+	for (int i = 0; i < AllocationBlockSize * 4; ++i) {
+		Handle_Handle64 handle = Handle_Manager64Alloc(manager);
+		REQUIRE(Handle_Manager64IsValid(manager, handle) == true);
+		Handle_Manager64Release(manager, handle);
+	}
+
+	Handle_Manager64Destroy(manager);
+}
+
+
+
+//------------------ Advanced tests -------------------//
+
 static Thread_Atomic64_t leaked = {0};
 static void InternalThreadFunc32(Handle_Manager32* manager, uint64_t totalAllocReleaseCycles ) {
 
@@ -212,8 +272,8 @@ TEST_CASE("Generation overflow stats 32", "[al2o3 handle]") {
 	LOGINFO("-----------------------------------------------------------------------");
 	LOGINFO("Starting generation overflow 32bit handle manager test - takes a while");
 
-	static const uint32_t blockSize = 1024 * 16;
-	static const uint64_t totalAllocReleaseCycles = 100000000ull;
+	static const uint32_t blockSize = 16;
+	static const uint64_t totalAllocReleaseCycles = 10000000ull;
 
 	Handle_Manager32* manager = Handle_Manager32Create(sizeof(Test),
 			blockSize,
@@ -225,23 +285,17 @@ TEST_CASE("Generation overflow stats 32", "[al2o3 handle]") {
 	uint64_t distance = 0;
 	uint64_t numDistances = 0;
 	CADT_VectorHandle allocTracker = CADT_VectorCreate(sizeof(uint64_t));
-	CADT_VectorReserve(allocTracker, 100000);
-
-	Handle_Manager32Alloc(manager); // remove 0 index from this test
-	CADT_VectorPushElement(allocTracker, &allocReleaseCycles);
+	for (uint64_t i = 0u; i < blockSize; ++i) {
+		CADT_VectorPushElement(allocTracker, &i);
+	}
 
 	while(allocReleaseCycles != totalAllocReleaseCycles ) {
 		Handle_Handle32 handle = Handle_Manager32Alloc(manager);
-		if((handle.handle >> 24u) == 1) {
-			uint32_t const index = (handle.handle & 0x00FFFFFFu);
-			if(index < CADT_VectorSize(allocTracker)) {
-				distance += allocReleaseCycles - *((uint64_t*)CADT_VectorAt(allocTracker, index));
-				numDistances++;
-				*(uint64_t*)CADT_VectorAt(allocTracker,index) = allocReleaseCycles;
-			} else {
-				CADT_VectorResize(allocTracker, index + 1);
-				*(uint64_t*)CADT_VectorAt(allocTracker, index) = allocReleaseCycles;
-			}
+		if((handle.handle >> Handle_GenerationBitShift32) == 0) {
+			uint32_t const index = (handle.handle & Handle_MaxHandles32);
+			distance += allocReleaseCycles - *((uint64_t*)CADT_VectorAt(allocTracker, index));
+			numDistances++;
+			*(uint64_t*)CADT_VectorAt(allocTracker,index) = allocReleaseCycles;
 		}
 		Handle_Manager32Release(manager, handle);
 		allocReleaseCycles++;
@@ -253,6 +307,7 @@ TEST_CASE("Generation overflow stats 32", "[al2o3 handle]") {
 		LOGINFO("No handle generation overflow has occured");
 	} else {
 		LOGINFO("Average distance between handle generation reuse %i", distance / numDistances);
+		LOGINFO("Expected Distance %u", (blockSize * (1<<8)));
 	}
 	LOGINFO("Objects allocated %u", allocated);
 
@@ -281,9 +336,9 @@ TEST_CASE("Generation overflow stats 32 never reissue old handles", "[al2o3 hand
 	while(allocReleaseCycles != totalAllocReleaseCycles ) {
 		Handle_Handle32 handle = Handle_Manager32Alloc(manager);
 		REQUIRE(Handle_Manager32IsValid(manager, handle));
-		if((handle.handle >> 24u) == 0) {
+		if((handle.handle >> Handle_GenerationSize32) == 0) {
 			// gen 0 should only ever increase in index (no reuse)
-			uint32_t const index = (handle.handle & 0x00FFFFFFu);
+			uint32_t const index = (handle.handle & Handle_GenerationSize32);
 			REQUIRE(index > gen0Max);
 			gen0Max = index;
 		}
@@ -293,8 +348,94 @@ TEST_CASE("Generation overflow stats 32 never reissue old handles", "[al2o3 hand
 
 	LOGINFO("After %" PRId64 " million alloc/release cycles", totalAllocReleaseCycles / 1000000ull);
 	uint32_t allocated = Thread_AtomicLoad32Relaxed(&manager->totalHandlesAllocated);
-	LOGINFO("Objects allocated: %u", allocated);
+	LOGINFO("Object overhead by never reuse: %u", allocated - blockSize);
 	LOGINFO("Memory overhead (with 8 byte objects): %u B", (allocated - blockSize) * sizeof(uint64_t));
 
 	Handle_Manager32Destroy(manager);
+}
+
+
+TEST_CASE("Generation overflow stats 64", "[al2o3 handle]") {
+	LOGINFO("-----------------------------------------------------------------------");
+	LOGINFO("Starting generation overflow 64bit handle manager test - takes a while");
+
+	static const uint32_t blockSize = 16;
+	static const uint64_t totalAllocReleaseCycles = 1000000000ull;
+
+	Handle_Manager64* manager = Handle_Manager64Create(sizeof(Test),
+																										 blockSize,
+																										 256,
+																										 false);
+	REQUIRE(manager);
+
+	uint64_t allocReleaseCycles = 0;
+	uint64_t distance = 0;
+	uint64_t numDistances = 0;
+	CADT_VectorHandle allocTracker = CADT_VectorCreate(sizeof(uint64_t));
+	for (uint64_t  i = 0u; i < blockSize; ++i) {
+		CADT_VectorPushElement(allocTracker, &i);
+	}
+
+	while(allocReleaseCycles != totalAllocReleaseCycles ) {
+		Handle_Handle64 handle = Handle_Manager64Alloc(manager);
+		if((handle.handle >> Handle_GenerationBitShift64) == 1) {
+			uint32_t const index = (handle.handle & Handle_MaxHandles64);
+			distance += allocReleaseCycles - *((uint64_t*)CADT_VectorAt(allocTracker, index));
+			numDistances++;
+			*(uint64_t*)CADT_VectorAt(allocTracker,index) = allocReleaseCycles;
+		}
+		Handle_Manager64Release(manager, handle);
+		allocReleaseCycles++;
+	}
+
+	LOGINFO("After %" PRId64 " million alloc/release cycles", totalAllocReleaseCycles / 1000000ull);
+	uint32_t allocated = Thread_AtomicLoad64Relaxed(&manager->totalHandlesAllocated);
+	if(numDistances == 0) {
+		LOGINFO("No handle generation overflow has occured");
+	} else {
+		LOGINFO("Average distance between handle generation reuse %i", distance / numDistances);
+		LOGINFO("Expected Distance %u", (blockSize * (1<<24)));
+	}
+	LOGINFO("Objects allocated %u", allocated);
+
+	CADT_VectorDestroy(allocTracker);
+	Handle_Manager64Destroy(manager);
+}
+
+TEST_CASE("Generation overflow stats 64 never reissue old handles", "[al2o3 handle]") {
+	LOGINFO("-----------------------------------------------------------------------");
+	LOGINFO("Starting generation overflow 64 bit handle manager with never reissue test - takes a while");
+
+	static const uint32_t blockSize = 16;
+	static const uint64_t totalAllocReleaseCycles = 400000000ull;
+	Handle_Manager64* manager = Handle_Manager64Create(sizeof(Test),
+																										 blockSize,
+																										 256,
+																										 true);
+	REQUIRE(manager);
+
+	uint64_t allocReleaseCycles = 0;
+	uint64_t gen0Max = 0;
+
+	Handle_Manager64Alloc(manager); // remove 0 index from this test
+
+	while(allocReleaseCycles != totalAllocReleaseCycles ) {
+		Handle_Handle64 handle = Handle_Manager64Alloc(manager);
+		REQUIRE(Handle_Manager64IsValid(manager, handle));
+		if((handle.handle >> Handle_GenerationSize64) == 0) {
+			// gen 0 should only ever increase in index (no reuse)
+			uint32_t const index = (handle.handle & Handle_MaxHandles64);
+			REQUIRE(index > gen0Max);
+			gen0Max = index;
+		}
+		Handle_Manager64Release(manager, handle);
+		allocReleaseCycles++;
+	}
+
+	LOGINFO("After %" PRId64 " million alloc/release cycles", totalAllocReleaseCycles / 1000000ull);
+	uint32_t allocated = Thread_AtomicLoad64Relaxed(&manager->totalHandlesAllocated);
+	LOGINFO("Object overhead by never reuse: %u", allocated - blockSize);
+	LOGINFO("Memory overhead (with 8 byte objects): %u B", (allocated - blockSize) * sizeof(uint64_t));
+
+	Handle_Manager64Destroy(manager);
 }
