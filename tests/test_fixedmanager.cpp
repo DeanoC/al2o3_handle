@@ -138,8 +138,8 @@ TEST_CASE("Multithreaded FixedManager", "[al2o3 handle fixed]") {
 
 	static const uint32_t numThreads = Thread_CPUCoreCount() * 5;
 	static const uint64_t totalTotalAllocReleaseCycles = totalAllocReleaseCycles * numThreads;
-	static const uint32_t totalSize = (totalTotalAllocReleaseCycles/ 1000) + (numThreads*2);
-	Handle_FixedManager32* manager = Handle_FixedManager32Create(sizeof(uint64_t), totalSize);
+	static const uint64_t totalSize = (totalTotalAllocReleaseCycles/ 1000) + (numThreads*2);
+	Handle_FixedManager32* manager = Handle_FixedManager32Create(sizeof(uint64_t), (uint32_t)totalSize);
 	REQUIRE(manager);
 
 	Thread_AtomicStore64Relaxed(&leaked, 0);

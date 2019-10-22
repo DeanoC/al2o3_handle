@@ -379,7 +379,7 @@ TEST_CASE("Generation overflow stats 64", "[al2o3 handle]") {
 	while(allocReleaseCycles != totalAllocReleaseCycles ) {
 		Handle_Handle64 handle = Handle_Manager64Alloc(manager);
 		if((handle.handle >> Handle_GenerationBitShift64) == 1) {
-			uint32_t const index = (handle.handle & Handle_MaxHandles64);
+			uint64_t const index = (handle.handle & Handle_MaxHandles64);
 			distance += allocReleaseCycles - *((uint64_t*)CADT_VectorAt(allocTracker, index));
 			numDistances++;
 			*(uint64_t*)CADT_VectorAt(allocTracker,index) = allocReleaseCycles;
@@ -389,7 +389,7 @@ TEST_CASE("Generation overflow stats 64", "[al2o3 handle]") {
 	}
 
 	LOGINFO("After %" PRId64 " million alloc/release cycles", totalAllocReleaseCycles / 1000000ull);
-	uint32_t allocated = Thread_AtomicLoad64Relaxed(&manager->totalHandlesAllocated);
+	uint64_t allocated = Thread_AtomicLoad64Relaxed(&manager->totalHandlesAllocated);
 	if(numDistances == 0) {
 		LOGINFO("No handle generation overflow has occured");
 	} else {
@@ -424,7 +424,7 @@ TEST_CASE("Generation overflow stats 64 never reissue old handles", "[al2o3 hand
 		REQUIRE(Handle_Manager64IsValid(manager, handle));
 		if((handle.handle >> Handle_GenerationSize64) == 0) {
 			// gen 0 should only ever increase in index (no reuse)
-			uint32_t const index = (handle.handle & Handle_MaxHandles64);
+			uint64_t const index = (handle.handle & Handle_MaxHandles64);
 			REQUIRE(index > gen0Max);
 			gen0Max = index;
 		}
@@ -433,7 +433,7 @@ TEST_CASE("Generation overflow stats 64 never reissue old handles", "[al2o3 hand
 	}
 
 	LOGINFO("After %" PRId64 " million alloc/release cycles", totalAllocReleaseCycles / 1000000ull);
-	uint32_t allocated = Thread_AtomicLoad64Relaxed(&manager->totalHandlesAllocated);
+	uint64_t allocated = Thread_AtomicLoad64Relaxed(&manager->totalHandlesAllocated);
 	LOGINFO("Object overhead by never reuse: %u", allocated - blockSize);
 	LOGINFO("Memory overhead (with 8 byte objects): %u B", (allocated - blockSize) * sizeof(uint64_t));
 
