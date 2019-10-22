@@ -72,13 +72,13 @@ static bool AllocNewBlock64(Handle_Manager64 *manager) {
 	// link the new block into the free list and attach existing free list to the
 	// end of this block
 Redo:;
-	uint128_t const heads = Thread_AtomicLoad128Relaxed(&manager->freeListHeads);
+	platform_uint128_t const heads = Thread_AtomicLoad128Relaxed(&manager->freeListHeads);
 	uint64_t const headsFreePart = platform_GetLower128(heads);
-	uint128_t const headsDeferFreePart = platform_ClearLower128(heads);
+	platform_uint128_t const headsDeferFreePart = platform_ClearLower128(heads);
 	ASSERT(((platform_GetLower128(heads) & Handle_MaxHandles64) >> manager->handlesPerBlockShift) < manager->maxBlocks);
 
 	// we chain to the next entry in the free list without disturbing the deferred list
-	uint128_t const newHeads = platform_Or128(headsDeferFreePart, platform_Load128From64(baseIndex));
+	platform_uint128_t const newHeads = platform_Or128(headsDeferFreePart, platform_Load128From64(baseIndex));
 	// point last new handle to existing free list (it might not be invalid by now)
 	*((uint64_t *) (base + (manager->handlesPerBlockMask * manager->elementSize))) = headsFreePart;
 
@@ -170,9 +170,9 @@ AL2O3_EXTERN_C Handle_Handle64 Handle_Manager64Alloc(Handle_Manager64 *manager) 
 	uint32_t noFreeCount = 0;
 Redo:;
 	// heads has 2 linked list packed in a 128 bit location. Its our transaction backout test as well
-	uint128_t const heads = Thread_AtomicLoad128Relaxed(&manager->freeListHeads);
+	platform_uint128_t const heads = Thread_AtomicLoad128Relaxed(&manager->freeListHeads);
 	uint64_t const headsFreePart = platform_GetLower128(heads); // discard high part
-	uint128_t const headsDeferFreePart = platform_ClearLower128(heads);
+	platform_uint128_t const headsDeferFreePart = platform_ClearLower128(heads);
 	ASSERT(((platform_GetLower128(heads) & Handle_MaxHandles64) >> manager->handlesPerBlockShift) < manager->maxBlocks);
 
 	// check to see if the free list is empty
@@ -192,7 +192,7 @@ Redo:;
 			noFreeCount++;
 			goto Redo;
 		} else {
-			uint128_t const newheads = platform_ShiftUpperToLower128(headsDeferFreePart);
+			platform_uint128_t const newheads = platform_ShiftUpperToLower128(headsDeferFreePart);
 			// we move the defer list into the free list position and mark the deferred as empty
 			// we don't even have to loop here as a transaction reverse is the same thing
 			Thread_AtomicCompareExchange128Relaxed(&manager->freeListHeads, heads, newheads);
@@ -210,7 +210,7 @@ Redo:;
 	uint64_t *const item = (uint64_t *) (base + (index * manager->elementSize));
 	ASSERT((uint8_t *) item < (base + ((manager->handlesPerBlockMask + 1) * manager->elementSize)));
 
-	uint128_t const newHeads = platform_Or128(headsDeferFreePart, platform_Load128From64(*item));
+	platform_uint128_t const newHeads = platform_Or128(headsDeferFreePart, platform_Load128From64(*item));
 
 	if (platform_Compare128(Thread_AtomicCompareExchange128Relaxed(&manager->freeListHeads, heads, newHeads),heads)) {
 		goto Redo; // something changed reverse the transaction
@@ -267,18 +267,18 @@ AL2O3_EXTERN_C void Handle_Manager64Release(Handle_Manager64 *manager, Handle_Ha
 		*gen = 1;
 	}
 
-	uint128_t indexInUpper = platform_LoadUpper128From64(handle.handle | 0xFFFFFF0000000000ull);
+	platform_uint128_t indexInUpper = platform_LoadUpper128From64(handle.handle | 0xFFFFFF0000000000ull);
 
 	RedoF:;
 	// add it to the deferred list without changing the free list
 	// repeat until we get a transaction okay response from CAS
-	uint128_t const heads = Thread_AtomicLoad128Relaxed(&manager->freeListHeads);
-	uint128_t const headsFreePart = platform_ClearUpper128(heads);
+	platform_uint128_t const heads = Thread_AtomicLoad128Relaxed(&manager->freeListHeads);
+	platform_uint128_t const headsFreePart = platform_ClearUpper128(heads);
 	uint64_t const headsDeferFreePart = platform_GetUpper128(heads);
 	ASSERT(((platform_GetLower128(heads) & Handle_MaxHandles64) >> manager->handlesPerBlockShift) < manager->maxBlocks);
 
 	*item = headsDeferFreePart;
-	uint128_t const newHeads = platform_Or128(indexInUpper, headsFreePart);
+	platform_uint128_t const newHeads = platform_Or128(indexInUpper, headsFreePart);
 	if (platform_Compare128(Thread_AtomicCompareExchange128Relaxed(&manager->freeListHeads, heads, newHeads), heads)) {
 		goto RedoF; // transaction fail redo inserting this index into deferred free list
 	}
