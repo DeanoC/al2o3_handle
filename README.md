@@ -6,7 +6,7 @@
 
 A generational safe handle/pool system for access to objects safer than a raw pointer
 
-Benfits:
+Benefits:
 
 32 bit handle can access 16.7 millions same sized objects. Each object can be upto 4GB in size (in theory). Objects are allocated in blocks (number of objects in a blocks are a creation parameter). Time to allocate and release an object is low and linear.
 
