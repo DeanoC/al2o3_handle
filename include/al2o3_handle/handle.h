@@ -17,6 +17,8 @@ typedef struct { uint64_t handle; } Handle_Handle64;
 #define Handle_GenerationBitShift64 40ull
 #define Handle_GenerationType64 uint32_t
 #define Handle_GenerationSize64 sizeof(Handle_GenerationType64)
+#define Handle_GenerationFlagsAlloced64 (0x1 << 24u)
+#define Handle_GenerationFlagsLeaked64 (0x2 << 24u)
 
 typedef struct Handle_Manager32 {
 	uint32_t elementSize;
@@ -123,6 +125,12 @@ AL2O3_FORCE_INLINE void *Handle_Manager32HandleToPtr(Handle_Manager32 *manager,
 	return (void *) (base + (index * manager->elementSize));
 }
 
+#define HANDLE_MANAGER64_GETBASE_CONST(manager, blockIndex ) (uint8_t const * const ) Thread_AtomicLoadPtrRelaxed(&manager->blocks[blockIndex]); ASSERT(base)
+#define HANDLE_MANAGER64_GETGEN_CONST(manager, base, index) (Handle_GenerationType64 const * const) (base + \
+																						((manager->handlesPerBlockMask + 1) * manager->elementSize) + \
+																						(index * Handle_GenerationSize64)); ASSERT(index < (manager->handlesPerBlockMask + 1))
+#define HANDLE_MANAGER64_MAKEHANDLE(gen, actualIndex) { .handle = ((uint64_t)(*gen & 0x00FFFFFFu)) << Handle_GenerationBitShift64 | actualIndex }
+
 AL2O3_FORCE_INLINE bool Handle_Manager64IsValid(Handle_Manager64 *manager,
 																								Handle_Handle64 handle) {
 	if (handle.handle == 0) {
@@ -134,14 +142,10 @@ AL2O3_FORCE_INLINE bool Handle_Manager64IsValid(Handle_Manager64 *manager,
 	uint64_t const index = actualIndex & manager->handlesPerBlockMask;
 
 	// fetch the base memory block for this index
-	uint8_t *base = (uint8_t *) Thread_AtomicLoadPtrRelaxed(&manager->blocks[blockIndex]);
-	ASSERT(base);
-	// point to generation data for this index
-	Handle_GenerationType64 *gen = (Handle_GenerationType64 *) (base +
-																((manager->handlesPerBlockMask + 1) * manager->elementSize) +
-																(index * Handle_GenerationSize64));
+	uint8_t const * const base = HANDLE_MANAGER64_GETBASE_CONST(manager, blockIndex);
+	Handle_GenerationType64 const * const gen = HANDLE_MANAGER64_GETGEN_CONST(manager, base, index);
 
-	return (handleGen == *gen);
+	return (handleGen == (*gen & 0x00FFFFFFu));
 }
 
 AL2O3_FORCE_INLINE void *Handle_Manager64HandleToPtr(Handle_Manager64 *manager,
@@ -159,8 +163,28 @@ AL2O3_FORCE_INLINE void *Handle_Manager64HandleToPtr(Handle_Manager64 *manager,
 	uint64_t const blockIndex = actualIndex >> manager->handlesPerBlockShift;
 	uint64_t const index = actualIndex & manager->handlesPerBlockMask;
 
-	uint8_t const
-			*const base = (uint8_t *) Thread_AtomicLoadPtrRelaxed(&manager->blocks[blockIndex]);
-	ASSERT(base);
+	uint8_t const * const base = HANDLE_MANAGER64_GETBASE_CONST(manager, blockIndex);
+
 	return (void *) (base + (index * manager->elementSize));
+}
+
+AL2O3_FORCE_INLINE Handle_Handle64 Handle_Manager64IndexToHandle(Handle_Manager64 *manager, uint64_t actualIndex) {
+	uint64_t const blockIndex = actualIndex >> manager->handlesPerBlockShift;
+	uint64_t const index = actualIndex & manager->handlesPerBlockMask;
+
+	// fetch the base memory block for this index
+	uint8_t const * const base = HANDLE_MANAGER64_GETBASE_CONST(manager, blockIndex);
+
+	// point to generation data for this index
+	Handle_GenerationType64 *gen = (Handle_GenerationType64 *) (base +
+			((manager->handlesPerBlockMask + 1) * manager->elementSize) +
+			(index * Handle_GenerationSize64));
+
+	if(*gen & Handle_GenerationFlagsAlloced64) {
+		Handle_Handle64 handle = HANDLE_MANAGER64_MAKEHANDLE(gen, actualIndex);
+		return handle;
+	} else {
+		Handle_Handle64 invalid = {0};
+		return invalid;
+	}
 }

@@ -225,10 +225,9 @@ Redo:;
 	Handle_GenerationType64 *gen = (Handle_GenerationType64 *)(base +
 			((manager->handlesPerBlockMask + 1) * manager->elementSize) +
 			(index * Handle_GenerationSize64));
+	*gen = *gen | Handle_GenerationFlagsAlloced64; // add in the alloced flag
 
-	Handle_Handle64 handle = {
-			.handle = ((uint64_t) *gen) << Handle_GenerationBitShift64 | actualIndex
-	};
+	Handle_Handle64 handle = HANDLE_MANAGER64_MAKEHANDLE(gen, actualIndex);
 	return handle;
 }
 
@@ -251,21 +250,28 @@ AL2O3_EXTERN_C void Handle_Manager64Release(Handle_Manager64 *manager, Handle_Ha
 	uint64_t *item = (uint64_t *) (base + (index * manager->elementSize));
 
 	// update the generation of this index
-	*gen = *gen + 1;
-	*gen = *gen & 0x00FFFFFFu;
-	if (*gen == 0 && manager->neverReissueOldHandles) {
+	uint32_t flags = *gen & 0xFF000000u;
+	uint32_t gene = *gen  & 0x00FFFFFFu;
+
+	gene = gene + 1;
+	gene = gene & 0x00FFFFFFu;
+	if (gene == 0 && manager->neverReissueOldHandles) {
 		// after generation wrap around simply lose the handle
 		// never putting it back in the free list means it never gets reused
 		// tho will get freed when the manager is
 
-		// poison the data
+		// mark and poison the data
+		*gen = Handle_GenerationFlagsLeaked64;
 		memset(item, 0xDC, manager->elementSize);
 		return;
 	}
+
 	// handle 0 special case
-	if (*gen == 0 && actualIndex == 0) {
-		*gen = 1;
+	if (gene == 0 && actualIndex == 0) {
+		gene = 1;
 	}
+	flags = flags ^ Handle_GenerationFlagsAlloced64; // kill the alloced flag
+	*gen = flags | gene;
 
 	platform_uint128_t indexInUpper = platform_LoadUpper128From64(handle.handle | 0xFFFFFF0000000000ull);
 
