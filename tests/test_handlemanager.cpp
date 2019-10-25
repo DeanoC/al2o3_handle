@@ -109,6 +109,27 @@ TEST_CASE("data access tests 32", "[al2o3 handle]") {
 	Handle_Manager32Destroy(manager);
 }
 
+TEST_CASE("clone 32", "[al2o3 handle]") {
+	Handle_Manager32* manager = Handle_Manager32Create(sizeof(Test), 16, 1, false);
+	REQUIRE(manager);
+
+	Handle_Handle32 handle0 = Handle_Manager32Alloc(manager);
+	REQUIRE(handle0.handle == 0x01000000);
+	Handle_Manager32Release(manager, handle0);
+	Handle_Handle32 handle1 = Handle_Manager32Alloc(manager);
+	REQUIRE(handle1.handle == 1);
+
+	Handle_Manager32* clone = Handle_Manager32Clone(manager);
+	REQUIRE(!Handle_Manager32IsValid(manager, handle0));
+	REQUIRE(!Handle_Manager32IsValid(clone, handle0));
+	REQUIRE(Handle_Manager32IsValid(manager, handle1));
+	REQUIRE(Handle_Manager32IsValid(clone, handle1));
+
+	Handle_Manager32Destroy(clone);
+	Handle_Manager32Destroy(manager);
+}
+
+
 TEST_CASE("Basic tests 64", "[al2o3 handle]") {
 	Handle_Manager64* manager = Handle_Manager64Create(sizeof(Test), 16, 1, false);
 	REQUIRE(manager);
@@ -143,6 +164,27 @@ TEST_CASE("Block allocation tests 64", "[al2o3 handle]") {
 
 	Handle_Manager64Destroy(manager);
 }
+
+TEST_CASE("clone 64", "[al2o3 handle]") {
+	Handle_Manager64* manager = Handle_Manager64Create(sizeof(Test), 16, 1, false);
+	REQUIRE(manager);
+
+	Handle_Handle64 handle0 = Handle_Manager64Alloc(manager);
+	REQUIRE(handle0.handle == 0x10000000000ull);
+	Handle_Manager64Release(manager, handle0);
+	Handle_Handle64 handle1 = Handle_Manager64Alloc(manager);
+	REQUIRE(handle1.handle == 1);
+
+	Handle_Manager64* clone = Handle_Manager64Clone(manager);
+	REQUIRE(!Handle_Manager64IsValid(manager, handle0));
+	REQUIRE(!Handle_Manager64IsValid(clone, handle0));
+	REQUIRE(Handle_Manager64IsValid(manager, handle1));
+	REQUIRE(Handle_Manager64IsValid(clone, handle1));
+
+	Handle_Manager64Destroy(clone);
+	Handle_Manager64Destroy(manager);
+}
+
 
 TEST_CASE("generation tests 64", "[al2o3 handle]") {
 	static const int AllocationBlockSize = 16;

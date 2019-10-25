@@ -102,8 +102,7 @@ AL2O3_EXTERN_C Handle_Manager32 *Handle_Manager32Create(uint32_t elementSize,
 	}
 
 	// each block has space for the data, the generation and the index into blocks for the base pointer
-	size_t const blockSize = (handlesPerBlock * elementSize) +
-			(handlesPerBlock * sizeof(uint8_t));
+	size_t const blockSize = (handlesPerBlock * elementSize) + (handlesPerBlock * sizeof(uint8_t));
 
 	// first block is attached directly to the header
 	size_t const allocSize = sizeof(Handle_Manager32)
@@ -166,6 +165,36 @@ AL2O3_EXTERN_C void Handle_Manager32Destroy(Handle_Manager32 *manager) {
 
 	MEMORY_FREE(manager);
 }
+
+AL2O3_EXTERN_C Handle_Manager32 *Handle_Manager32Clone(Handle_Manager32 *src) {
+	if (!src) {
+		return NULL;
+	}
+	Handle_Manager32 *manager = Handle_Manager32Create(src->elementSize,
+																										 src->handlesPerBlockMask + 1,
+																										 src->maxBlocks,
+																										 src->neverReissueOldHandles);
+	if(!manager) {
+		return NULL;
+	}
+	size_t const blockSize = ((src->handlesPerBlockMask + 1) * src->elementSize) + ((src->handlesPerBlockMask + 1) * sizeof(uint8_t));
+
+	// copy over the 1st embedded block
+	memcpy(manager->blocks[0].nonatomic, src->blocks[0].nonatomic, blockSize);
+	for (uint32_t i = 1u; i < src->maxBlocks; ++i) {
+		void *ptr = Thread_AtomicLoadPtrRelaxed(&src->blocks[i]);
+		if (ptr) {
+			manager->blocks[i].nonatomic = MEMORY_MALLOC(blockSize);
+			memcpy(manager->blocks[i].nonatomic, src->blocks[i].nonatomic, blockSize);
+		}
+	}
+
+	manager->totalHandlesAllocated = src->totalHandlesAllocated;
+	manager->freeListHeads = src->freeListHeads;
+
+	return manager;
+}
+
 
 AL2O3_EXTERN_C Handle_Handle32 Handle_Manager32Alloc(Handle_Manager32 *manager) {
 	uint32_t noFreeCount = 0;

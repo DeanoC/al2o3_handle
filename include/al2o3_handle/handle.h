@@ -25,7 +25,6 @@ typedef struct Handle_Manager32 {
 	uint32_t maxBlocks;
 	uint32_t handlesPerBlockMask;
 	uint32_t handlesPerBlockShift;
-
 	uint32_t neverReissueOldHandles : 1;
 
 	// we sometimes want to decrement and other times we need to swap the lists atomically
@@ -68,8 +67,8 @@ AL2O3_EXTERN_C Handle_Manager32 *Handle_Manager32Create(uint32_t elementSize,
 																												uint32_t allocationBlockSize,
 																												uint32_t maxBlocks,
 																												bool neverReissueOldHandles);
-
 AL2O3_EXTERN_C void Handle_Manager32Destroy(Handle_Manager32 *manager);
+AL2O3_EXTERN_C Handle_Manager32 *Handle_Manager32Clone(Handle_Manager32 *src);
 
 AL2O3_EXTERN_C Handle_Handle32 Handle_Manager32Alloc(Handle_Manager32 *manager);
 AL2O3_EXTERN_C void Handle_Manager32Release(Handle_Manager32 *manager, Handle_Handle32 handle);
@@ -78,8 +77,8 @@ AL2O3_EXTERN_C Handle_Manager64 *Handle_Manager64Create(uint32_t elementSize,
 																												uint32_t allocationBlockSize,
 																												uint32_t maxBlocks,
 																												bool neverReissueOldHandles);
-
 AL2O3_EXTERN_C void Handle_Manager64Destroy(Handle_Manager64 *manager);
+AL2O3_EXTERN_C Handle_Manager64 *Handle_Manager64Clone(Handle_Manager64 *src);
 
 AL2O3_EXTERN_C Handle_Handle64 Handle_Manager64Alloc(Handle_Manager64 *manager);
 AL2O3_EXTERN_C void Handle_Manager64Release(Handle_Manager64 *manager, Handle_Handle64 handle);

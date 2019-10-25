@@ -44,7 +44,7 @@ static bool AllocNewBlock64(Handle_Manager64 *manager) {
 
 	if (baseIndex >= (manager->handlesPerBlockMask + 1) * manager->maxBlocks) {
 		LOGWARNING("Trying to allocate more than %i blocks! Increase block size or max blocks", manager->maxBlocks);
-		Thread_AtomicFetchAdd64Relaxed(&manager->totalHandlesAllocated, -(int64_t)(manager->handlesPerBlockMask + 1));
+		Thread_AtomicFetchAdd64Relaxed(&manager->totalHandlesAllocated, -(int64_t) (manager->handlesPerBlockMask + 1));
 		return false;
 	}
 
@@ -71,7 +71,7 @@ static bool AllocNewBlock64(Handle_Manager64 *manager) {
 
 	// link the new block into the free list and attach existing free list to the
 	// end of this block
-Redo:;
+	Redo:;
 	platform_uint128_t const heads = Thread_AtomicLoad128Relaxed(&manager->freeListHeads);
 	uint64_t const headsFreePart = platform_GetLower128(heads);
 	platform_uint128_t const headsDeferFreePart = platform_ClearLower128(heads);
@@ -82,7 +82,7 @@ Redo:;
 	// point last new handle to existing free list (it might not be invalid by now)
 	*((uint64_t *) (base + (manager->handlesPerBlockMask * manager->elementSize))) = headsFreePart;
 
-	if (platform_Compare128(Thread_AtomicCompareExchange128Relaxed(&manager->freeListHeads, heads, newHeads),heads)) {
+	if (platform_Compare128(Thread_AtomicCompareExchange128Relaxed(&manager->freeListHeads, heads, newHeads), heads)) {
 		goto Redo; // something changed reverse the transaction
 	}
 
@@ -126,7 +126,7 @@ AL2O3_EXTERN_C Handle_Manager64 *Handle_Manager64Create(uint32_t elementSize,
 		return NULL;
 	}
 	// get to blocks space with 8 byte alignment guarenteed
-	manager->blocks = (Thread_AtomicPtr_t*)(((uintptr_t)base + blockSize + 0x8ull) & ~0x7ull);
+	manager->blocks = (Thread_AtomicPtr_t *) (((uintptr_t) base + blockSize + 0x8ull) & ~0x7ull);
 	Thread_AtomicStorePtrRelaxed(manager->blocks + 0, base);
 	Thread_AtomicStore64Relaxed(&manager->totalHandlesAllocated, handlesPerBlock);
 
@@ -139,7 +139,7 @@ AL2O3_EXTERN_C Handle_Manager64 *Handle_Manager64Create(uint32_t elementSize,
 	}
 
 	// index zero is born generation 1
-	*(Handle_GenerationType64*)((base + (handlesPerBlock * manager->elementSize))) = 1;
+	*(Handle_GenerationType64 *) ((base + (handlesPerBlock * manager->elementSize))) = 1;
 
 	// fix last index to point to the invalid marker
 	*((uint64_t *) (base + ((handlesPerBlock - 1) * manager->elementSize))) = 0;
@@ -166,9 +166,39 @@ AL2O3_EXTERN_C void Handle_Manager64Destroy(Handle_Manager64 *manager) {
 	MEMORY_FREE(manager);
 }
 
+
+AL2O3_EXTERN_C Handle_Manager64 *Handle_Manager64Clone(Handle_Manager64 *src) {
+	if (!src) {
+		return NULL;
+	}
+	Handle_Manager64 *manager = Handle_Manager64Create(src->elementSize,
+																										 src->handlesPerBlockMask + 1,
+																										 src->maxBlocks,
+																										 src->neverReissueOldHandles);
+	if(!manager) {
+		return NULL;
+	}
+	size_t const blockSize = ((src->handlesPerBlockMask + 1) * src->elementSize) + ((src->handlesPerBlockMask + 1) * sizeof(uint8_t));
+
+	// copy over the 1st embedded block
+	memcpy(manager->blocks[0].nonatomic, src->blocks[0].nonatomic, blockSize);
+	for (uint32_t i = 1u; i < src->maxBlocks; ++i) {
+		void *ptr = Thread_AtomicLoadPtrRelaxed(&src->blocks[i]);
+		if (ptr) {
+			manager->blocks[i].nonatomic = MEMORY_MALLOC(blockSize);
+			memcpy(manager->blocks[i].nonatomic, src->blocks[i].nonatomic, blockSize);
+		}
+	}
+
+	manager->totalHandlesAllocated = src->totalHandlesAllocated;
+	manager->freeListHeads = src->freeListHeads;
+
+	return manager;
+}
+
 AL2O3_EXTERN_C Handle_Handle64 Handle_Manager64Alloc(Handle_Manager64 *manager) {
 	uint32_t noFreeCount = 0;
-Redo:;
+	Redo:;
 	// heads has 2 linked list packed in a 128 bit location. Its our transaction backout test as well
 	platform_uint128_t const heads = Thread_AtomicLoad128Relaxed(&manager->freeListHeads);
 	uint64_t const headsFreePart = platform_GetLower128(heads); // discard high part
@@ -212,7 +242,7 @@ Redo:;
 
 	platform_uint128_t const newHeads = platform_Or128(headsDeferFreePart, platform_Load128From64(*item));
 
-	if (platform_Compare128(Thread_AtomicCompareExchange128Relaxed(&manager->freeListHeads, heads, newHeads),heads)) {
+	if (platform_Compare128(Thread_AtomicCompareExchange128Relaxed(&manager->freeListHeads, heads, newHeads), heads)) {
 		goto Redo; // something changed reverse the transaction
 	}
 
@@ -222,7 +252,7 @@ Redo:;
 
 	// now make the handle and return it
 	// point to generation data for this index
-	Handle_GenerationType64 *gen = (Handle_GenerationType64 *)(base +
+	Handle_GenerationType64 *gen = (Handle_GenerationType64 *) (base +
 			((manager->handlesPerBlockMask + 1) * manager->elementSize) +
 			(index * Handle_GenerationSize64));
 	*gen = *gen | Handle_GenerationFlagsAlloced64; // add in the alloced flag
@@ -243,7 +273,7 @@ AL2O3_EXTERN_C void Handle_Manager64Release(Handle_Manager64 *manager, Handle_Ha
 	// fetch the base memory block for this index
 	uint8_t *base = (uint8_t *) Thread_AtomicLoadPtrRelaxed(&manager->blocks[blockIndex]);
 	// point to generation data for this index
-	Handle_GenerationType64 *gen = (Handle_GenerationType64*)(base +
+	Handle_GenerationType64 *gen = (Handle_GenerationType64 *) (base +
 			((manager->handlesPerBlockMask + 1) * manager->elementSize) +
 			(index * Handle_GenerationSize64));
 
@@ -251,7 +281,7 @@ AL2O3_EXTERN_C void Handle_Manager64Release(Handle_Manager64 *manager, Handle_Ha
 
 	// update the generation of this index
 	uint32_t flags = *gen & 0xFF000000u;
-	uint32_t gene = *gen  & 0x00FFFFFFu;
+	uint32_t gene = *gen & 0x00FFFFFFu;
 
 	gene = gene + 1;
 	gene = gene & 0x00FFFFFFu;
