@@ -129,7 +129,7 @@ AL2O3_FORCE_INLINE void *Handle_Manager32HandleToPtr(Handle_Manager32 *manager,
 #define HANDLE_MANAGER64_GETGEN_CONST(manager, base, index) (Handle_GenerationType64 const * const) (base + \
 																						((manager->handlesPerBlockMask + 1) * manager->elementSize) + \
 																						(index * Handle_GenerationSize64)); ASSERT(index < (manager->handlesPerBlockMask + 1))
-#define HANDLE_MANAGER64_MAKEHANDLE(gen, actualIndex) { .handle = ((uint64_t)(*gen & 0x00FFFFFFu)) << Handle_GenerationBitShift64 | actualIndex }
+#define HANDLE_MANAGER64_MAKEHANDLE(gen, actualIndex) { ((uint64_t)(*gen & 0x00FFFFFFu)) << Handle_GenerationBitShift64 | actualIndex }
 
 AL2O3_FORCE_INLINE bool Handle_Manager64IsValid(Handle_Manager64 *manager,
 																								Handle_Handle64 handle) {
