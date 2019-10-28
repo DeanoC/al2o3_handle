@@ -12,6 +12,8 @@ typedef struct { uint64_t handle; } Handle_Handle64;
 #define Handle_GenerationBitShift32 24u
 #define Handle_GenerationType32 uint8_t
 #define Handle_GenerationSize32 sizeof(Handle_GenerationType32)
+#define Handle_HandleDistance32(a, b) (((b).handle & Handle_MaxHandles32) - ((a).handle & Handle_MaxHandles32))
+#define Handle_HandleEqual32(a, b) ((a).handle == (b).handle)
 
 #define Handle_MaxHandles64 0x000000FFFFFFFFFFull
 #define Handle_GenerationBitShift64 40ull
@@ -19,6 +21,8 @@ typedef struct { uint64_t handle; } Handle_Handle64;
 #define Handle_GenerationSize64 sizeof(Handle_GenerationType64)
 #define Handle_GenerationFlagsAlloced64 (0x1 << 24u)
 #define Handle_GenerationFlagsLeaked64 (0x2 << 24u)
+#define Handle_HandleDistance64(a, b) (((b).handle & Handle_MaxHandles64) - ((a).handle & Handle_MaxHandles64))
+#define Handle_HandleEqual64(a, b) ((a).handle == (b).handle)
 
 typedef struct Handle_Manager32 {
 	uint32_t elementSize;
