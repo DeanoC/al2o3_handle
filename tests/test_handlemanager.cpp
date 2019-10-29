@@ -363,7 +363,7 @@ TEST_CASE("Generation overflow stats 32 never reissue old handles", "[al2o3 hand
 	LOGINFO("Starting generation overflow 32 bit handle manager with never reissue test - takes a while");
 
 	static const uint32_t blockSize = 1024 * 16;
-	static const uint64_t totalAllocReleaseCycles = 100000000ull;
+	static const uint64_t totalAllocReleaseCycles = 50000000ull;
 	Handle_Manager32* manager = Handle_Manager32Create(sizeof(Test),
 			blockSize,
 			256,
@@ -402,7 +402,7 @@ TEST_CASE("Generation overflow stats 64", "[al2o3 handle]") {
 	LOGINFO("Starting generation overflow 64bit handle manager test - takes a while");
 
 	static const uint32_t blockSize = 16;
-	static const uint64_t totalAllocReleaseCycles = 1000000000ull;
+	static const uint64_t totalAllocReleaseCycles = 500000000ull;
 
 	Handle_Manager64* manager = Handle_Manager64Create(sizeof(Test),
 																										 blockSize,
@@ -449,7 +449,7 @@ TEST_CASE("Generation overflow stats 64 never reissue old handles", "[al2o3 hand
 	LOGINFO("Starting generation overflow 64 bit handle manager with never reissue test - takes a while");
 
 	static const uint32_t blockSize = 16;
-	static const uint64_t totalAllocReleaseCycles = 400000000ull;
+	static const uint64_t totalAllocReleaseCycles = 200000000ull;
 	Handle_Manager64* manager = Handle_Manager64Create(sizeof(Test),
 																										 blockSize,
 																										 256,
