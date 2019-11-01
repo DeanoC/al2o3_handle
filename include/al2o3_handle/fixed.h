@@ -3,7 +3,6 @@
 
 #include "al2o3_thread/atomic.h"
 // A 32 bit handle can access 16.7 million objects and 256 generations per handle
-// Handle_InvalidDynamicHandle32 == 0 to help catch clear before alloc bugs
 typedef uint32_t Handle_FixedHandle32;
 #define Handle_MaxFixedHandles32 0x00FFFFFF
 // Handle_InvalidFixedHandle32 == 0 to help catch clear before alloc bugs
