@@ -178,7 +178,8 @@ AL2O3_EXTERN_C Handle_Manager64 *Handle_Manager64Clone(Handle_Manager64 *src) {
 	if(!manager) {
 		return NULL;
 	}
-	size_t const blockSize = ((src->handlesPerBlockMask + 1) * src->elementSize) + ((src->handlesPerBlockMask + 1) * sizeof(uint8_t));
+	size_t const blockSize = ((src->handlesPerBlockMask + 1) * src->elementSize) +
+														((src->handlesPerBlockMask + 1) * Handle_GenerationSize64);
 
 	// copy over the 1st embedded block
 	memcpy(manager->blocks[0].nonatomic, src->blocks[0].nonatomic, blockSize);
